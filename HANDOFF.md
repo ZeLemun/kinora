@@ -33,7 +33,21 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 ## 2. THE open question: can it play video?
 
-**No, not yet — and this needs your decision.**
+### ⚠️ CONFIRMED BROKEN ON DEVICE — playback does not work
+
+**I tried to watch a movie in the app on the phone. It does not play.** Tapping
+*Watch Now* either opens the player to a "this stream cannot be played" message,
+or there is nothing playable listed at all. This is not a cosmetic bug.
+
+**Reproduce it:** open any title → the *Sources* section. The streams that come
+back are torrent/P2P descriptors, not HTTP URLs, so the player has nothing to
+load.
+
+**Root cause:** the WebView has no torrent engine. See below.
+
+---
+
+There is **no free, no-account source of playable HTTP streams.** Two ways forward — pick one:
 
 I tested every plausible add-on against the real Stremio API:
 
@@ -44,8 +58,6 @@ I tested every plausible add-on against the real Stremio API:
 | **Cinemeta** | Returns P2P torrents. Not playable. |
 
 ElfHosted's own docs confirm this: *"We don't recommend running Stremio in 'free mode' (no provider, just P2P or HTTP-direct addons)."*
-
-There is **no free, no-account source of playable HTTP streams.** Two ways forward — pick one:
 
 ### Option A — Debrid (recommended, ~free, 1–2h work)
 User gets a token for Real-Debrid / TorBox / AllDebrid / Premiumize, installs **AIOStreams**, **Comet** or **MediaFusion**, and pastes it into the Configure form. Those add-ons then return real `https://` URLs that play in a plain `<video>`.
@@ -124,6 +136,7 @@ Vite + React 19 + TS + Tailwind v4 + Capacitor 8  →  Android (done)  →  iOS 
 
 **Blocked on your decision (§2):**
 - [ ] Pick Option A (debrid) or B (torrent engine)
+- [ ] **Until then the app is a catalogue browser, not a player** — the single most important outstanding item
 
 **Then:**
 - [ ] Verify next-episode auto-advance on a real series

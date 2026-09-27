@@ -1,39 +1,25 @@
-# Dependencies
+# deps / build output
 node_modules/
-
-# Build outputs
 dist/
-build/
-*.apk
-*.ipa
+*.tsbuildinfo
 
-# Capacitor
+# local tooling binaries — never commit these
+platform-tools/
+scrcpy-win64-v*/
 android/app/build/
-android/app/release/
-ios/App/build/
-ios/App/Pods/
+android/build/
+android/.gradle/
+android/app/src/main/assets/public/
+android/capacitor-cordova-android-plugins/
+android/local.properties
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
+# generated Capacitor config
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
 
-# OS
+# os / editor
 .DS_Store
 Thumbs.db
-
-# Environment
-.env
-.env.local
-.env.*.local
-
-# Logs
+.vscode/
+.idea/
 *.log
-npm-debug.log*
-
-# Testing
-coverage/
-
-# Capacitor generated
-capacitor.config.json
