@@ -1,0 +1,25 @@
+TERMUX SETUP — MovieStream
+============================
+
+1. Update packages:
+   pkg update && pkg upgrade -y
+
+2. Install Node.js and npm:
+   pkg install nodejs -y
+
+3. Navigate to the project folder:
+   cd ~/storage/downloads/movie-site   # (adjust path as needed)
+
+4. Install project dependencies:
+   npm install
+
+5. Start the server:
+   npm start
+
+   This will launch lite-server and open the site in your browser.
+
+OPTIONAL — Install a code editor:
+   pkg install nano -y         # terminal editor
+
+NOTE: The site fetches data from TMDB API and uses embed players,
+so an internet connection is required.
