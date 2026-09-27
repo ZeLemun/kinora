@@ -1,21 +1,27 @@
 import { Link } from 'react-router-dom';
+import { useState } from 'react';
 import { MetaCard, MetaCardSkeleton } from './MetaCard';
+import { tmdb } from '../services/tmdb';
 import { cn } from '../utils/cn';
 import { Skeleton } from './ui/basic';
 import { useTranslation } from '../hooks/useTranslation';
 
+export interface RailItem {
+  id: string;
+  name: string;
+  poster?: string;
+  backdrop?: string;
+  posterShape?: 'regular' | 'landscape' | 'square';
+  releaseInfo?: string;
+  rating?: number;
+  type: 'movie' | 'series';
+  genres?: string[];
+  overview?: string;
+}
+
 interface RailProps {
   title: string;
-  items: Array<{
-    id: string;
-    name: string;
-    poster?: string;
-    posterShape?: 'regular' | 'landscape' | 'square';
-    releaseInfo?: string;
-    rating?: number;
-    type: 'movie' | 'series';
-    genres?: string[];
-  }>;
+  items: RailItem[];
   isLoading?: boolean;
   skeletonCount?: number;
   size?: 'small' | 'medium' | 'large';
@@ -24,6 +30,38 @@ interface RailProps {
   className?: string;
 }
 
+/** Stremio-style section header: title left, optional action(s) right. */
+function SectionHeader({
+  title,
+  onSeeMore,
+  seeMoreLabel,
+  children,
+}: {
+  title: string;
+  onSeeMore?: () => void;
+  seeMoreLabel?: string;
+  children?: React.ReactNode;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="mb-3 flex items-center justify-between gap-3">
+      <h2 className="truncate text-base font-semibold tracking-wide text-text sm:text-lg">{title}</h2>
+      <div className="flex flex-none items-center gap-3">
+        {children}
+        {onSeeMore && (
+          <button
+            onClick={onSeeMore}
+            className="text-[11px] font-semibold uppercase tracking-wider text-text-muted transition-colors hover:text-primary"
+          >
+            {seeMoreLabel ?? t('seeAll')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Section header + horizontal poster carousel with a "See all" action. */
 export function Rail({
   title,
   items,
@@ -31,133 +69,125 @@ export function Rail({
   skeletonCount = 8,
   size = 'medium',
   onSeeMore,
-  seeMoreLabel = 'See more',
+  seeMoreLabel,
   className,
 }: RailProps) {
-  const { t } = useTranslation();
+  const header = (
+    <SectionHeader title={title} onSeeMore={onSeeMore} seeMoreLabel={seeMoreLabel} />
+  );
 
   if (isLoading) {
     return (
-      <div className={cn('space-y-4', className)}>
-        <div className="flex items-center justify-between px-4">
-          <h2 className="text-xl font-semibold text-text">{title}</h2>
-        </div>
-        <div className="rail gap-4 px-4" role="list">
+      <section className={className}>
+        {header}
+        <div className="rail rail-bleed" role="list">
           {Array.from({ length: skeletonCount }).map((_, i) => (
             <MetaCardSkeleton key={i} size={size} />
           ))}
         </div>
-      </div>
+      </section>
     );
   }
 
-  if (items.length === 0) {
-    return (
-      <div className={cn('space-y-4', className)}>
-        <div className="flex items-center justify-between px-4">
-          <h2 className="text-xl font-semibold text-text">{title}</h2>
-        </div>
-        <div className="px-4 py-12 text-center text-text-muted">
-          {t('noResults') || 'No results found'}
-        </div>
-      </div>
-    );
-  }
+  if (items.length === 0) return null;
 
   return (
-    <div className={cn('space-y-4', className)}>
-      <div className="flex items-center justify-between px-4">
-        <h2 className="text-xl font-semibold text-text">{title}</h2>
-        {onSeeMore && (
-          <button
-            onClick={onSeeMore}
-            className="text-sm text-text-muted hover:text-text transition-colors"
-          >
-            {seeMoreLabel}
-          </button>
-        )}
-      </div>
-      <div className="rail gap-4 px-4" role="list">
+    <section className={className}>
+      {header}
+      <div className="rail rail-bleed" role="list">
         {items.map((item, index) => (
-          <MetaCard
-            key={`${item.id}-${index}`}
-            meta={item}
-            size={size}
-            showRating
-            showYear
-          />
+          <MetaCard key={`${item.id}-${index}`} meta={item} size={size} />
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
 interface TopTenRailProps {
   title: string;
-  items: Array<{
-    id: string;
-    name: string;
-    poster?: string;
-    releaseInfo?: string;
-    rating?: number;
-    type: 'movie' | 'series';
-  }>;
+  items: RailItem[];
   isLoading?: boolean;
+  onSeeMore?: () => void;
+  /** Rendered on the right of the header, e.g. the Movies/TV Shows toggle. */
+  headerAction?: React.ReactNode;
   className?: string;
 }
 
+/** Poster grid columns: more columns as the viewport widens, capped tile width. */
+const GRID = 'grid grid-cols-3 gap-2 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10';
+/** Landscape is short: keep tiles small so several rows fit above the fold. */
+const TILE = 'max-w-[150px] [@media(orientation:landscape)]:max-w-[112px]';
+
+/**
+ * Top 10 shown as a poster grid with a rank badge — never a plain text list.
+ */
 export function TopTenRail({
   title,
   items,
   isLoading = false,
+  onSeeMore,
+  headerAction,
   className,
 }: TopTenRailProps) {
-
   if (isLoading) {
     return (
-      <div className={cn('space-y-4', className)}>
-        <h2 className="text-xl font-semibold text-text px-4">{title}</h2>
-        <div className="space-y-2 px-4">
+      <section className={className}>
+        <SectionHeader title={title} onSeeMore={onSeeMore}>
+          {headerAction}
+        </SectionHeader>
+        <div className={GRID}>
           {Array.from({ length: 10 }).map((_, i) => (
-            <Skeleton key={i} className="h-16 rounded-lg" />
+            <Skeleton key={i} className="aspect-[2/3] max-w-[150px] rounded-lg [@media(orientation:landscape)]:max-w-[112px]" />
           ))}
         </div>
-      </div>
+      </section>
     );
   }
 
-  if (items.length === 0) {
-    return null;
-  }
+  if (items.length === 0) return null;
 
   return (
-    <div className={cn('space-y-4', className)}>
-      <h2 className="text-xl font-semibold text-text px-4">{title}</h2>
-      <div className="space-y-2 px-4">
+    <section className={className}>
+      <SectionHeader title={title} onSeeMore={onSeeMore}>
+        {headerAction}
+      </SectionHeader>
+      <div className={GRID}>
         {items.slice(0, 10).map((item, index) => (
-          <Link
-            key={`${item.id}-${index}`}
-            to={`/${item.type}/${item.id}`}
-            className="flex items-center gap-4 p-2 rounded-lg bg-surface-hover hover:bg-surface-hover/80 transition-colors group"
-          >
-            <div className="flex-shrink-0 w-10 h-10 font-bold text-xl text-text-muted bg-surface rounded-lg flex items-center justify-center">
-              {index + 1}
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="font-medium truncate text-text">{item.name}</h3>
-              <div className="flex items-center gap-2 text-xs text-text-muted">
-                {item.releaseInfo && <span>{new Date(item.releaseInfo).getFullYear()}</span>}
-                {item.rating && (
-                  <span className="flex items-center gap-1">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
-                    {item.rating.toFixed(1)}
-                  </span>
-                )}
-              </div>
-            </div>
-          </Link>
+          <TopTenTile key={`${item.id}-${index}`} item={item} rank={index + 1} />
         ))}
       </div>
-    </div>
+    </section>
+  );
+}
+
+function TopTenTile({ item, rank }: { item: RailItem; rank: number }) {
+  const [broken, setBroken] = useState(false);
+  const posterUrl = broken ? null : tmdb.resolveImage(item.poster, 'w342');
+
+  return (
+    <Link to={`/${item.type}/${item.id}`} className={cn('group block', TILE)}>
+      {/* Poster and title are separate blocks so the rank badge never overlaps text. */}
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-surface-hover">
+        {posterUrl ? (
+          <img
+            src={posterUrl}
+            alt={item.name}
+            loading="lazy"
+            onError={() => setBroken(true)}
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-surface-hover to-surface text-2xl font-semibold text-text-muted">
+            {item.name.charAt(0)}
+          </div>
+        )}
+
+        <span className="pointer-events-none absolute left-1.5 top-1.5 rounded-md bg-black/60 px-1.5 text-[11px] font-bold leading-[18px] text-white">
+          {rank}
+        </span>
+      </div>
+
+      <p className="mt-1.5 truncate whitespace-nowrap text-xs text-text-muted">{item.name}</p>
+    </Link>
   );
 }

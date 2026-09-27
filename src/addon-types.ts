@@ -1,9 +1,12 @@
+/** A resource is either a bare name ("stream") or a per-type object descriptor. */
+export type ResourceSpec = string | { name: string; types?: string[]; idPrefixes?: string[] };
+
 export interface Manifest {
   id: string;
   version: string;
   name: string;
   description: string;
-  resources: string[];
+  resources: ResourceSpec[];
   types: string[];
   idPrefixes?: string[];
   catalogs?: Catalog[];
@@ -127,7 +130,8 @@ export interface AddonConfig {
   key: string;
   title: string;
   type: 'text' | 'password' | 'checkbox' | 'select' | 'multiSelect';
-  options?: { value: string; label: string }[];
+  /** Stremio serves plain strings; some add-ons send {value,label} objects. */
+  options?: (string | { value: string; label: string })[];
   required?: boolean;
   default?: string | boolean | string[];
 }
@@ -161,6 +165,7 @@ export interface LibraryItem {
   type: string;
   id: string;
   title: string;
+  poster?: string;
   progress: number;
   duration: number;
   season?: number;

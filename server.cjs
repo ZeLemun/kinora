@@ -34,7 +34,7 @@ const path = require('path');
 const dns = require('dns');
 const { URL } = require('url');
 
-const ROOT = __dirname;
+const ROOT = path.join(__dirname, 'dist');
 const PORT = Number(process.env.SPORT_PORT || process.env.PORT || 3000);
 const HOST = process.env.SPORT_HOST || '0.0.0.0';
 
@@ -631,12 +631,39 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
+    // SPA fallback: serve index.html for non-API routes (SPA routing)
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      if (!pathname.startsWith('/api/') && !pathname.includes('.')) {
+        // This is a client-side route, serve index.html
+        const indexPath = path.join(ROOT, 'index.html');
+        try {
+          const stat = await fsp.stat(indexPath);
+          const type = MIME['.html'] || 'text/html; charset=utf-8';
+          const etag = `W/"${stat.size}-${Math.floor(stat.mtimeMs)}"`;
+          
+          if (req.headers['if-none-match'] === etag) {
+            res.writeHead(304, { ETag: etag });
+            res.end();
+            return;
+          }
+          
+          res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Content-Length': stat.size,
+            'Cache-Control': 'no-cache',
+            ETag: etag,
+            'Access-Control-Allow-Origin': '*'
+          });
+          fs.createReadStream(indexPath).pipe(res);
+          return;
+        } catch (_) {
+          // index.html not found, fall through to 404
+        }
+      }
+      await serveStatic(req, res, pathname);
+    } else {
       res.writeHead(405).end('Method not allowed');
-      return;
     }
-
-    await serveStatic(req, res, pathname);
   } catch (err) {
     console.error('[server]', err);
     if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'text/plain' });

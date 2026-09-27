@@ -1,150 +1,173 @@
 import { Link } from 'react-router-dom';
 import { tmdb } from '../services/tmdb';
 import { formatYear, formatRating } from '../utils/cn';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Button, Skeleton } from './ui/basic';
 import { useTranslation } from '../hooks/useTranslation';
 import { cn } from '../utils/cn';
 
+export interface HeroItem {
+  id: string;
+  name: string;
+  poster?: string;
+  /** TMDB backdrop_path (relative) or an absolute URL. */
+  backdrop?: string;
+  releaseInfo?: string;
+  rating?: number;
+  type: 'movie' | 'series';
+  overview?: string;
+  genres?: string[];
+  runtime?: number;
+}
+
 interface HeroProps {
-  items: Array<{
-    id: string;
-    name: string;
-    poster?: string;
-    backdrop_path?: string;
-    releaseInfo?: string;
-    rating?: number;
-    type: 'movie' | 'series';
-    overview?: string;
-    genres?: string[];
-  }>;
+  items: HeroItem[];
   isLoading?: boolean;
   className?: string;
 }
 
+/** Portrait: tall banner. Landscape: short banner so rows below stay visible. */
+const HERO_BOX =
+  'relative h-[78vw] max-h-[460px] w-full overflow-hidden bg-surface-hover ' +
+  '[@media(orientation:landscape)]:h-[34vh] [@media(orientation:landscape)]:max-h-[300px]';
+
 export function Hero({ items, isLoading = false, className }: HeroProps) {
   const { t } = useTranslation();
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [autoPlay, setAutoPlay] = useState(true);
-
-  const currentItem = items[currentIndex];
+  const [index, setIndex] = useState(0);
+  const [broken, setBroken] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    if (!autoPlay || items.length <= 1) return;
-    const interval = setInterval(() => {
-      setCurrentIndex((prev) => (prev + 1) % items.length);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [autoPlay, items.length]);
+    if (items.length <= 1) return;
+    const timer = setInterval(() => setIndex((i) => (i + 1) % items.length), 7000);
+    return () => clearInterval(timer);
+  }, [items.length]);
 
-  const handleMouseEnter = useCallback(() => setAutoPlay(false), []);
-  const handleMouseLeave = useCallback(() => setAutoPlay(true), []);
+  useEffect(() => {
+    if (index >= items.length) setIndex(0);
+  }, [index, items.length]);
 
-  if (isLoading || !currentItem) {
+  if (isLoading || items.length === 0) {
     return (
-      <div className={cn('relative aspect-[16/9] rounded-xl overflow-hidden bg-surface-hover', className)}>
-        <Skeleton className="absolute inset-0" />
+      <div className={cn(HERO_BOX, className)}>
+        <Skeleton className="absolute inset-0 rounded-none" />
       </div>
     );
   }
 
-  const backdropUrl = currentItem.backdrop_path
-    ? tmdb.getBackdropUrl(currentItem.backdrop_path, 'w1280')
-    : null;
+  const active = Math.min(index, items.length - 1);
+  const item = items[active];
 
   return (
-    <div
-      className={cn('relative aspect-[16/9] rounded-xl overflow-hidden', className)}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-    >
-      {backdropUrl && (
-        <img
-          src={backdropUrl}
-          alt=""
-          className="absolute inset-0 w-full h-full object-cover"
-        />
-      )}
-
-      <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/60 to-transparent" />
-
-      <div className="absolute inset-0 flex flex-col justify-end p-6 md:p-12">
-        <div className="max-w-4xl">
-          <div className="flex flex-wrap gap-2 mb-4">
-            {currentItem.genres?.slice(0, 3).map((genre) => (
-              <span key={genre} className="px-3 py-1 text-sm rounded-full bg-primary/20 text-primary border border-primary/30">
-                {genre}
-              </span>
-            ))}
+    <div className={cn(HERO_BOX, className)}>
+      {/* All slides are stacked and crossfade; the active one also slowly zooms. */}
+      {items.map((slide, i) => {
+        const src = broken[slide.id] ? null : tmdb.resolveImage(slide.backdrop, 'w1280');
+        const isActive = i === active;
+        return (
+          <div
+            key={slide.id}
+            aria-hidden={!isActive}
+            className={cn(
+              'absolute inset-0 transition-opacity duration-[1000ms] ease-out',
+              isActive ? 'opacity-100' : 'pointer-events-none opacity-0'
+            )}
+          >
+            {src ? (
+              <img
+                src={src}
+                alt=""
+                onError={() => setBroken((b) => ({ ...b, [slide.id]: true }))}
+                className={cn('h-full w-full object-cover object-top', isActive && 'kenburns')}
+              />
+            ) : (
+              <div
+                className={cn('h-full w-full scale-110 bg-cover bg-center blur-2xl', isActive && 'kenburns')}
+                style={{
+                  backgroundImage: tmdb.resolveImage(slide.poster, 'w500')
+                    ? `url(${tmdb.resolveImage(slide.poster, 'w500')})`
+                    : undefined,
+                  opacity: 0.55,
+                }}
+              />
+            )}
           </div>
+        );
+      })}
 
-          <Link to={`/${currentItem.type}/${currentItem.id}`} className="block group">
-            <h1 className="text-3xl md:text-5xl lg:text-6xl font-bold text-white mb-4 group-hover:text-primary transition-colors">
-              {currentItem.name}
+      {/* Transparent at the top so the fanart pops, solid at the bottom for text. */}
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-background/25 to-background" />
+
+      {/* keyed on the slide so the copy fades in with the artwork */}
+      <div key={item.id} className="absolute inset-x-0 bottom-0 animate-[fadeUp_700ms_ease-out] p-4 pb-6 sm:p-6">
+        <div className="max-w-2xl">
+          <Link to={`/${item.type}/${item.id}`}>
+            <h1 className="text-hero-shadow line-clamp-2 text-3xl font-bold leading-tight text-white sm:text-5xl">
+              {item.name}
             </h1>
           </Link>
 
-          <div className="flex flex-wrap items-center gap-4 mb-6 text-sm text-gray-300">
-            {currentItem.releaseInfo && <span>{formatYear(currentItem.releaseInfo)}</span>}
-            {currentItem.releaseInfo && currentItem.rating && <span>·</span>}
-            {currentItem.rating && (
-              <span className="flex items-center gap-1 text-yellow-400">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
-                {formatRating(currentItem.rating)}
+          {/* Single metadata row: rating, year, genres. */}
+          <div className="text-hero-shadow-sm mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-normal text-white/80 sm:text-sm">
+            {item.rating ? (
+              <span className="flex items-center gap-1 font-medium text-yellow-400">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                </svg>
+                {formatRating(item.rating)}
               </span>
-            )}
-            {currentItem.type === 'series' && (
-              <span className="px-2 py-0.5 rounded bg-white/10 backdrop-blur-sm">
-                {t('series') || 'Series'}
-              </span>
-            )}
-            {currentItem.type === 'movie' && (
-              <span className="px-2 py-0.5 rounded bg-white/10 backdrop-blur-sm">
-                {t('movie') || 'Movie'}
-              </span>
-            )}
+            ) : null}
+            {item.releaseInfo ? <span>{formatYear(item.releaseInfo)}</span> : null}
+            {item.genres?.slice(0, 3).map((g) => (
+              <span key={g}>{g}</span>
+            ))}
           </div>
 
-          <p className="text-gray-300 mb-6 max-w-2xl text-base md:text-lg line-clamp-3">
-            {currentItem.overview || t('noDescription') || 'No description available'}
-          </p>
+          {item.overview ? (
+            <p className="text-hero-shadow-sm mt-2.5 line-clamp-2 text-xs leading-relaxed text-white/80 sm:line-clamp-3 sm:text-sm">
+              {item.overview}
+            </p>
+          ) : null}
 
-          <div className="flex flex-wrap gap-4">
-            <Link to={`/watch/${currentItem.type}/${currentItem.id}`}>
-              <Button size="lg" className="gap-2">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          {/* Uniform height, 10dp radius, equal width on mobile. */}
+          <div className="mt-5 flex gap-2">
+            <Link to={`/watch/${item.type}/${item.id}`} className="min-w-0 flex-1 sm:flex-none">
+              <Button size="md" className="h-11 w-full gap-2 rounded-[10px] sm:w-auto sm:px-6">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M8 5v14l11-7z" />
                 </svg>
-                {t('watchNow') || 'Watch Now'}
+                {t('watchNow')}
               </Button>
             </Link>
-            <Link to={`/${currentItem.type}/${currentItem.id}`}>
-              <Button size="lg" variant="ghost" className="bg-white/10 text-white hover:bg-white/20 border-white/20">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <Link to={`/${item.type}/${item.id}`} className="min-w-0 flex-1 sm:flex-none">
+              <Button
+                size="md"
+                variant="secondary"
+                className="h-11 w-full gap-2 rounded-[10px] border-white/20 bg-white/15 text-white hover:bg-white/25 sm:w-auto sm:px-6"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" />
-                  <path d="M12 16v-4" />
-                  <path d="M12 8h.01" />
+                  <path d="M12 16v-4M12 8h.01" strokeLinecap="round" />
                 </svg>
-                {t('moreInfo') || 'More Info'}
+                {t('moreInfo')}
               </Button>
             </Link>
           </div>
         </div>
       </div>
 
+      {/* Pagination dots, bottom-right just above the CTA row. */}
       {items.length > 1 && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2">
-          {items.map((_, index) => (
+        <div className="absolute bottom-3 right-4 flex items-center gap-1.5">
+          {items.map((it, i) => (
             <button
-              key={index}
-              onClick={() => setCurrentIndex(index)}
+              key={it.id}
+              onClick={() => setIndex(i)}
+              aria-label={it.name}
+              aria-current={i === index}
               className={cn(
-                'w-2 h-2 rounded-full transition-all',
-                index === currentIndex
-                  ? 'bg-white w-6'
-                  : 'bg-white/40 hover:bg-white/60'
+                'h-1 rounded-full transition-all duration-300',
+                i === index ? 'w-4 bg-white' : 'w-1 bg-white/45'
               )}
-              aria-label={`Go to slide ${index + 1}`}
             />
           ))}
         </div>

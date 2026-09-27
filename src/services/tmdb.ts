@@ -197,6 +197,30 @@ export const tmdb = {
     return tmdbFetch<{ genres: TMDBGenre[] }>(`/genre/${type}/list`);
   },
 
+  /** Sortable/filterable catalog used by the "See all" browse page. */
+  async discover(
+    type: 'movie' | 'tv',
+    options: { page?: number; genreId?: number | null; sortBy?: string; year?: number | null } = {}
+  ) {
+    const { page = 1, genreId = null, sortBy, year = null } = options;
+    const params: Record<string, string | number> = { page };
+    if (genreId) params.with_genres = genreId;
+    if (year) {
+      if (type === 'movie') {
+        params['primary_release_date.gte'] = `${year}-01-01`;
+        params['primary_release_date.lte'] = `${year}-12-31`;
+      } else {
+        params['first_air_date.gte'] = `${year}-01-01`;
+        params['first_air_date.lte'] = `${year}-12-31`;
+      }
+    }
+    if (sortBy) params.sort_by = sortBy;
+    return tmdbFetch<TMDBResponse<TMDBMovie | TMDBTVShow>>(
+      `/discover/${type}`,
+      params
+    );
+  },
+
   async findByIMDb(imdbId: string) {
     return tmdbFetch<{ movie_results: TMDBMovie[]; tv_results: TMDBTVShow[] }>(`/find/${imdbId}`, {
       external_source: 'imdb_id',
@@ -221,5 +245,15 @@ export const tmdb = {
   getLogoUrl(path: string | null, size: 'w45' | 'w92' | 'w154' | 'w185' | 'w300' | 'w500' | 'original' = 'w300') {
     if (!path) return null;
     return `${IMG_BASE}/${size}${path}`;
+  },
+
+  /**
+   * Accepts either a TMDB relative path ("/abc.jpg") or an absolute URL
+   * (Cinemeta / metahub) and returns something an <img> can load.
+   */
+  resolveImage(path: string | null | undefined, size: 'w185' | 'w342' | 'w500' | 'w780' | 'w1280' | 'original' = 'w500') {
+    if (!path) return null;
+    if (/^https?:\/\//i.test(path)) return path;
+    return `${IMG_BASE}/${size}${path.startsWith('/') ? path : `/${path}`}`;
   },
 };

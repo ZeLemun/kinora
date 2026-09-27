@@ -5,7 +5,6 @@ import type { LibraryItem, InstalledAddon } from '../addon-types';
 interface AppState {
   theme: 'dark' | 'light' | 'system';
   language: string;
-  serverUrl: string;
   installedAddons: InstalledAddon[];
   library: LibraryItem[];
   continueWatching: LibraryItem[];
@@ -13,9 +12,10 @@ interface AppState {
   searchHistory: string[];
   setTheme: (theme: 'dark' | 'light' | 'system') => void;
   setLanguage: (lang: string) => void;
-  setServerUrl: (url: string) => void;
   addAddon: (addon: InstalledAddon) => void;
   removeAddon: (transportUrl: string) => void;
+  toggleAddon: (transportUrl: string) => void;
+  setAddonConfig: (transportUrl: string, config: Record<string, unknown>) => void;
   toggleFavorite: (id: string) => void;
   addToLibrary: (item: LibraryItem) => void;
   removeFromLibrary: (type: string, id: string) => void;
@@ -49,6 +49,22 @@ const defaultAddons: InstalledAddon[] = [
     transportUrl: 'https://v3-cinemeta.strem.io',
     enabled: true,
   },
+  {
+    manifest: {
+      id: 'stremio.addons.mediafusion|elfhosted',
+      version: '1.0.0',
+      name: 'MediaFusion',
+      description: 'Aggregates direct HTTP streaming sources (no torrent needed)',
+      resources: [{ name: 'stream', types: ['movie', 'series', 'tv'], idPrefixes: ['tt', 'tmdb:', 'mf', 'dl'] }],
+      types: ['movie', 'series', 'tv'],
+      idPrefixes: ['tt', 'tmdb:', 'mf', 'dl'],
+      behaviorHints: { p2p: false, configurable: true },
+    },
+    // NB: MediaFusion only serves streams under /stremio — the bare host
+    // returns an empty list for every id.
+    transportUrl: 'https://mediafusion.elfhosted.com/stremio',
+    enabled: true,
+  },
 ];
 
 export const useAppStore = create<AppState>()(
@@ -56,7 +72,6 @@ export const useAppStore = create<AppState>()(
     (set, _get) => ({
       theme: 'dark',
       language: 'en',
-      serverUrl: '',
       installedAddons: defaultAddons,
       library: [],
       continueWatching: [],
@@ -71,8 +86,6 @@ export const useAppStore = create<AppState>()(
 
       setLanguage: (language) => set({ language }),
 
-      setServerUrl: (serverUrl) => set({ serverUrl }),
-
       addAddon: (addon) =>
         set((state) => ({
           installedAddons: [...state.installedAddons.filter((a) => a.transportUrl !== addon.transportUrl), addon],
@@ -81,6 +94,20 @@ export const useAppStore = create<AppState>()(
       removeAddon: (transportUrl) =>
         set((state) => ({
           installedAddons: state.installedAddons.filter((a) => a.transportUrl !== transportUrl),
+        })),
+
+      toggleAddon: (transportUrl) =>
+        set((state) => ({
+          installedAddons: state.installedAddons.map((a) =>
+            a.transportUrl === transportUrl ? { ...a, enabled: !a.enabled } : a
+          ),
+        })),
+
+      setAddonConfig: (transportUrl, config) =>
+        set((state) => ({
+          installedAddons: state.installedAddons.map((a) =>
+            a.transportUrl === transportUrl ? { ...a, config } : a
+          ),
         })),
 
       toggleFavorite: (id) =>
@@ -105,7 +132,7 @@ export const useAppStore = create<AppState>()(
         set((state) => {
           const existing = state.library.find((i) => i.type === type && i.id === id);
           const title = existing?.title || id;
-          const newItem: LibraryItem = { type, id, title, progress, duration, season, episode, lastWatched: Date.now() };
+          const newItem: LibraryItem = { ...existing, type, id, title, progress, duration, season, episode, lastWatched: Date.now() };
           const library = [...state.library.filter((i) => !(i.type === type && i.id === id)), newItem];
           const continueWatching = library
             .filter((i) => i.progress > 0 && i.progress < i.duration * 0.9)
@@ -123,16 +150,38 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'kinora-storage',
-      version: 1,
+      version: 3,
       partialize: (state) => ({
         theme: state.theme,
         language: state.language,
-        serverUrl: state.serverUrl,
         installedAddons: state.installedAddons,
         library: state.library,
         favorites: state.favorites,
         searchHistory: state.searchHistory,
       }),
+      // Installs the app's own default add-ons for installs created before they
+      // shipped, and repairs their transport URLs if they changed in a release.
+      // Anything the user added or disabled is left alone.
+      migrate: (persisted) => {
+        const state = (persisted ?? {}) as Partial<AppState>;
+        const byId = new Map((state.installedAddons ?? []).map((a) => [a.manifest.id, a]));
+        for (const addon of defaultAddons) {
+          const existing = byId.get(addon.manifest.id);
+          if (!existing) {
+            byId.set(addon.manifest.id, addon);
+          } else if (existing.transportUrl !== addon.transportUrl) {
+            byId.set(addon.manifest.id, { ...existing, transportUrl: addon.transportUrl });
+          }
+        }
+        return {
+          theme: state.theme ?? 'dark',
+          language: state.language ?? 'en',
+          installedAddons: [...byId.values()],
+          library: state.library ?? [],
+          favorites: state.favorites ?? [],
+          searchHistory: state.searchHistory ?? [],
+        };
+      },
     }
   )
 );

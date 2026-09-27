@@ -32,6 +32,7 @@ const config: CapacitorConfig = {
     allowMixedContent: true,
     captureInput: true,
     webContentsDebuggingEnabled: true,
+    buildType: 'debug',
   },
 };
 

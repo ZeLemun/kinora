@@ -1,411 +1,453 @@
-import { useParams, Link } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from '../hooks/useTranslation';
-import { useMeta, useStreams, useSubtitles } from '../hooks/useStremio';
+import { useMeta, useStreams, useSubtitles, useLibrary, useFavorites } from '../hooks/useStremio';
 import { useDetails, tmdb } from '../hooks/useTMDB';
-import { formatRuntime, formatYear, formatRating } from '../utils/cn';
+import { formatRuntime, formatYear, formatRating, cn } from '../utils/cn';
 import { Button, Badge } from '../components/ui/basic';
-import { cn } from '../utils/cn';
-import { useState } from 'react';
-import { useLibrary, useFavorites } from '../hooks/useStremio';
+import { ErrorFallback, LoadingState } from '../components/ErrorFallback';
+import type { Stream } from '../addon-types';
+import { PlayerModal } from '../components/PlayerModal';
 
 export function DetailPage() {
   const { type, id } = useParams<{ type: string; id: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
   const { t } = useTranslation();
-  const { library, addToLibrary, removeFromLibrary } = useLibrary();
+  const { library, addToLibrary, removeFromLibrary, updateProgress } = useLibrary();
   const { favorites, toggleFavorite } = useFavorites();
 
   const isMovie = type === 'movie';
   const mediaType = isMovie ? 'movie' : 'series';
   const tmdbType = isMovie ? 'movie' : 'tv';
 
-  const { data: metaData, isLoading: metaLoading, error: metaError } = useMeta(mediaType, id || '');
-  const { data: tmdbData, isLoading: tmdbLoading } = useDetails(tmdbType, parseInt(id || '0'));
-  const { data: streamsData, isLoading: _streamsLoading } = useStreams(mediaType, id || '');
-  const { data: subtitlesData } = useSubtitles(mediaType, id || '');
+  // Routes may carry either a TMDB numeric id (from TMDB rails) or a Stremio/IMDb id.
+  const rawId = id ?? '';
+  const isImdbId = /^tt\d+/i.test(rawId);
+  const tmdbId = isImdbId ? 0 : Number(rawId) || 0;
 
-  const [selectedSeason, setSelectedSeason] = useState(1);
-  const [showPlayer, setShowPlayer] = useState(false);
-  const [selectedStream, setSelectedStream] = useState(0);
+  const { data: tmdbData, isLoading: tmdbLoading, error: tmdbError } = useDetails(tmdbType, tmdbId);
+
+  // Cinemeta (and every other addon) keys on IMDb ids, so we must resolve them first.
+  const imdbId = isImdbId ? rawId : (tmdbData?.external_ids?.imdb_id ?? '');
+
+  const { data: metaData } = useMeta(mediaType, imdbId);
+
+  const [season, setSeason] = useState(1);
+  const [episode, setEpisode] = useState(1);
+  const [player, setPlayer] = useState<Stream | null>(null);
+
+  const streamId = !isMovie && imdbId ? `${imdbId}:${season}:${episode}` : imdbId;
+  const { data: streamsData, isLoading: streamsLoading } = useStreams(mediaType, streamId);
+  const { data: subtitlesData } = useSubtitles(mediaType, streamId);
 
   const meta = metaData?.meta;
-  const tmdbDetails = tmdbData;
-  const streams = streamsData?.streams || [];
-  const subtitles = subtitlesData?.subtitles || [];
+  const details = tmdbData;
+  const streams = streamsData?.streams ?? [];
+  const subtitles = subtitlesData?.subtitles ?? [];
 
-  const isInLibrary = library.some(item => item.type === mediaType && item.id === id);
-  const isFavorite = favorites.includes(id || '');
+  const title = meta?.name ?? details?.title ?? details?.name ?? rawId;
+  const overview = meta?.description ?? details?.overview ?? t('noDescription');
+  const poster = tmdb.resolveImage(meta?.poster ?? details?.poster_path ?? null, 'w500');
+  // Prefer TMDB artwork (known to load); fall back to metahub by IMDb id.
+  const backdrop =
+    tmdb.resolveImage(details?.backdrop_path ?? null, 'w1280') ??
+    (meta?.id ? `https://images.metahub.space/background/medium/${meta.id}/bg.jpg` : null);
+  const releaseInfo = meta?.releaseInfo ?? details?.release_date ?? details?.first_air_date;
+  const rating = meta?.rating ?? details?.vote_average;
+  const genres = meta?.genres ?? details?.genres?.map((g) => g.name) ?? [];
+  const runtime = details?.runtime ?? details?.episode_run_time?.[0];
+  const cast = details?.credits?.cast?.slice(0, 12) ?? [];
+  const videos =
+    details?.videos?.results?.filter(
+      (v) => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser')
+    ) ?? [];
+  const seasons = (details?.seasons ?? []).filter((s) => s.season_number > 0);
 
-  const handleWatch = (streamIndex: number) => {
-    setSelectedStream(streamIndex);
-    setShowPlayer(true);
-  };
+  const isInLibrary = library.some((item) => item.id === rawId);
+  const isFavorite = favorites.includes(rawId);
+  const autoplay = location.pathname.startsWith('/watch');
+  const autoTried = useRef(false);
 
-  const handleFavoriteToggle = () => {
-    toggleFavorite(id || '');
-  };
+  // On /watch routes open the first available stream as soon as it arrives.
+  useEffect(() => {
+    if (!autoplay || autoTried.current) return;
+    if (streams.length > 0) {
+      autoTried.current = true;
+      setPlayer(streams[0]);
+    }
+  }, [autoplay, streams]);
+
+  if (!isImdbId && tmdbLoading) return <LoadingState message={t('loading')} />;
+
+  if (!isImdbId && (tmdbError || !details)) {
+    return (
+      <ErrorFallback
+        message={t('notFound')}
+        error={tmdbError instanceof Error ? tmdbError : undefined}
+        onRetry={() => window.location.reload()}
+      />
+    );
+  }
 
   const handleListToggle = () => {
     if (isInLibrary) {
-      removeFromLibrary({ type: mediaType, id: id || '' });
-    } else if (tmdbDetails) {
-      addToLibrary({
-        type: mediaType,
-        id: id || '',
-        title: tmdbDetails.title || tmdbDetails.name || '',
-        duration: tmdbDetails.runtime || tmdbDetails.episode_run_time?.[0] || 0,
-      });
+      removeFromLibrary({ type: mediaType, id: rawId });
+      return;
     }
+    addToLibrary({
+      type: mediaType,
+      id: rawId,
+      title,
+      duration: runtime ?? 0,
+      poster: details?.poster_path ?? meta?.poster ?? undefined,
+    });
   };
 
-  const seasons = tmdbDetails?.seasons?.filter(s => s.season_number > 0) || [];
+  const handleWatch = () => {
+    if (streams.length > 0) setPlayer(streams[0]);
+  };
 
-  if (metaLoading && tmdbLoading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="h-8 w-48 mx-auto rounded animate-pulse bg-surface-hover" />
-          <div className="h-4 w-64 mx-auto mt-4 rounded animate-pulse bg-surface-hover" />
-        </div>
-      </div>
-    );
-  }
+  // Advances to the next episode and immediately opens its first stream.
+  const goToNextEpisode = () => {
+    const next = episode + 1;
+    setEpisode(next);
+    setPlayer(null);
+    // Wait for the query keyed on the new episode id to resolve.
+    pendingNext.current = next;
+  };
 
-  if (metaError || (!meta && !tmdbDetails)) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-4">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-text mb-2">{t('error') || 'Error'}</h1>
-          <p className="text-text-muted">{t('notFound') || 'Content not found'}</p>
-        </div>
-      </div>
-    );
-  }
-
-  const title = meta?.name || tmdbDetails?.title || tmdbDetails?.name || id;
-  const overview = meta?.description || tmdbDetails?.overview || t('noDescription');
-  const poster = meta?.poster ? tmdb.getImageUrl(meta.poster, 'w500') : (tmdbDetails?.poster_path ? tmdb.getImageUrl(tmdbDetails.poster_path, 'w500') : null);
-  const backdrop = meta?.background ? tmdb.getBackdropUrl(meta.background, 'w1280') : (tmdbDetails?.backdrop_path ? tmdb.getBackdropUrl(tmdbDetails.backdrop_path, 'w1280') : null);
-  const releaseInfo = meta?.releaseInfo || tmdbDetails?.release_date || tmdbDetails?.first_air_date;
-  const rating = meta?.rating || tmdbDetails?.vote_average;
-  const genres = meta?.genres || tmdbDetails?.genres?.map((g: any) => g.name) || [];
-  const runtime = tmdbDetails?.runtime || tmdbDetails?.episode_run_time?.[0];
-  const cast = tmdbDetails?.credits?.cast?.slice(0, 10) || [];
-  const videos = tmdbDetails?.videos?.results?.filter((v: any) => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser')) || [];
+  // Once the new episode's streams arrive, open them without another tap.
+  const pendingNext = useRef<number | null>(null);
+  useEffect(() => {
+    if (pendingNext.current === null) return;
+    if (episode !== pendingNext.current) return;
+    if (streams.length > 0) {
+      setPlayer(streams[0]);
+      pendingNext.current = null;
+    }
+  }, [episode, streams]);
 
   return (
-    <div className="min-h-screen bg-background">
-      {backdrop && (
-        <div className="absolute inset-0 -z-10">
-          <img src={backdrop} alt="" className="w-full h-[60vh] object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent" />
-        </div>
-      )}
+    <div className="relative min-h-screen bg-background">
+      {/* Backdrop header — same pattern as the home Hero, which renders reliably. */}
+      <div className="relative h-[58vh] max-h-[480px] w-full overflow-hidden">
+        {backdrop ? (
+          <img src={backdrop} alt="" className="h-full w-full object-cover object-top" />
+        ) : poster ? (
+          <div
+            className="h-full w-full scale-110 bg-cover bg-center blur-2xl"
+            style={{ backgroundImage: `url(${poster})`, opacity: 0.5 }}
+          />
+        ) : null}
+        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-background/10" />
 
-      <div className="max-w-7xl mx-auto px-4 pb-12 relative z-10">
-        <div className="pt-32 pb-6">
-          <div className="flex flex-col md:flex-row gap-6">
-            {poster && (
-              <img
-                src={poster}
-                alt={title}
-                className="w-full md:w-72 aspect-[2/3] rounded-xl shadow-2xl object-cover flex-shrink-0"
-              />
-            )}
+        <div className="absolute inset-x-0 bottom-0 px-4 pb-5 sm:px-6">
+          <div className="max-w-2xl">
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {genres.slice(0, 3).map((g) => (
+                <span
+                  key={g}
+                  className="rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-medium text-white/90 backdrop-blur-sm"
+                >
+                  {g}
+                </span>
+              ))}
+            </div>
 
-            <div className="flex-1 min-w-0 pt-4 md:pt-0">
-              <div className="flex flex-wrap gap-2 mb-4">
-                {genres.slice(0, 4).map((genre: string) => (
-                  <Badge key={genre} variant="primary">{genre}</Badge>
-                ))}
-              </div>
+            <h1 className="line-clamp-2 text-3xl font-bold leading-tight text-white drop-shadow-lg sm:text-4xl">
+              {title}
+            </h1>
 
-              <h1 className="text-3xl md:text-4xl font-bold text-text mb-2">{title}</h1>
-
-              <div className="flex flex-wrap items-center gap-4 mb-4 text-sm text-text-muted">
-                {releaseInfo && <span>{formatYear(releaseInfo)}</span>}
-                {releaseInfo && rating && <span>·</span>}
-                {rating && (
-                  <span className="flex items-center gap-1 text-yellow-400">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>
-                    {formatRating(rating)}
-                  </span>
-                )}
-                {runtime && <span>{formatRuntime(runtime)}</span>}
-                {!isMovie && <span className="px-2 py-0.5 rounded bg-white/10 backdrop-blur-sm">{t('series') || 'Series'}</span>}
-                {isMovie && <span className="px-2 py-0.5 rounded bg-white/10 backdrop-blur-sm">{t('movie') || 'Movie'}</span>}
-              </div>
-
-              <p className="text-text-muted mb-6 max-w-2xl">{overview}</p>
-
-              <div className="flex flex-wrap gap-3">
-                {streams.length > 0 && (
-                  <Button onClick={() => handleWatch(0)} size="lg" className="gap-2">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-                    {t('watchNow') || 'Watch Now'}
-                  </Button>
-                )}
-                <Button variant="secondary" onClick={handleListToggle} size="lg" className="gap-2">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill={isInLibrary ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/85 sm:text-sm">
+              <span className="rounded bg-white/15 px-1.5 py-0.5 font-medium backdrop-blur-sm">
+                {isMovie ? t('movies') : t('series')}
+              </span>
+              {releaseInfo ? <span>{formatYear(releaseInfo)}</span> : null}
+              {runtime ? <span>{formatRuntime(runtime)}</span> : null}
+              {rating ? (
+                <span className="flex items-center gap-1 text-yellow-400">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
                   </svg>
-                  {isInLibrary ? t('removeFromList') : t('addToList')}
-                </Button>
-                <Button variant="ghost" onClick={handleFavoriteToggle} size="lg" className="gap-2">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill={isFavorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
-                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                  </svg>
-                </Button>
-              </div>
+                  {formatRating(rating)}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button onClick={handleWatch} disabled={streams.length === 0} size="md" className="gap-1.5">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+                {t('watchNow')}
+              </Button>
+              <Button variant="secondary" onClick={handleListToggle} size="md" className="gap-1.5">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill={isInLibrary ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                </svg>
+                {isInLibrary ? t('removeFromList') : t('addToList')}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => toggleFavorite(rawId)}
+                aria-label={t('favorites')}
+                className="border border-white/20 bg-white/10 px-3 text-white hover:bg-white/20"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill={isFavorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+                  <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                </svg>
+              </Button>
             </div>
           </div>
         </div>
+      </div>
 
+      <button
+        onClick={() => navigate(-1)}
+        className="absolute left-4 top-[calc(env(safe-area-inset-top)+0.75rem)] z-10 rounded-full bg-black/60 p-2 text-white backdrop-blur-sm"
+        aria-label="Indietro"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+        </svg>
+      </button>
+
+      <div className="mx-auto w-full max-w-5xl px-4 pb-10">
+        {/* Poster + quick facts, in normal flow so nothing gets clipped. */}
+        <div className="-mt-12 flex gap-4">
+          {poster ? (
+            <img
+              src={poster}
+              alt={title}
+              className="aspect-[2/3] w-24 flex-none rounded-lg object-cover shadow-xl sm:w-32"
+            />
+          ) : (
+            <div className="flex aspect-[2/3] w-24 flex-none items-center justify-center rounded-lg bg-surface-hover text-2xl font-semibold text-text-muted sm:w-32">
+              {title.charAt(0)}
+            </div>
+          )}
+
+          <dl className="min-w-0 flex-1 space-y-1.5 pt-1 text-sm">
+            {meta?.director && (
+              <div>
+                <dt className="inline text-text-muted">{t('director')}: </dt>
+                <dd className="inline text-text">{meta.director}</dd>
+              </div>
+            )}
+            {releaseInfo && (
+              <div>
+                <dt className="inline text-text-muted">{t('year')}: </dt>
+                <dd className="inline text-text">{formatYear(releaseInfo)}</dd>
+              </div>
+            )}
+            {runtime && (
+              <div>
+                <dt className="inline text-text-muted">{t('episodes')}: </dt>
+                <dd className="inline text-text">{formatRuntime(runtime)}</dd>
+              </div>
+            )}
+          </dl>
+        </div>
+
+        <p className="mt-4 max-w-3xl text-sm leading-relaxed text-text-muted">{overview}</p>
+
+        {/* Seasons */}
         {!isMovie && seasons.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-semibold text-text mb-4">{t('seasons') || 'Seasons'}</h2>
-            <div className="flex flex-wrap gap-2">
-              {seasons.map((season: any) => (
+          <section className="mt-8">
+            <h2 className="mb-3 text-lg font-semibold text-text">{t('seasons')}</h2>
+            <div className="rail gap-2 pb-2">
+              {seasons.map((s) => (
                 <button
-                  key={season.season_number}
+                  key={s.season_number}
                   onClick={() => {
-                    setSelectedSeason(season.season_number);
+                    setSeason(s.season_number);
+                    setEpisode(1);
                   }}
                   className={cn(
-                    'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
-                    selectedSeason === season.season_number
+                    'flex-none whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+                    season === s.season_number
                       ? 'bg-primary text-white'
-                      : 'bg-surface text-text hover:bg-surface-hover border border-border'
+                      : 'bg-surface text-text-muted hover:bg-surface-hover'
                   )}
                 >
-                  {season.name || `Season ${season.season_number}`}
+                  {s.name || `${t('seasons')} ${s.season_number}`}
                 </button>
               ))}
             </div>
-          </div>
+          </section>
         )}
 
-        {streams.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-semibold text-text mb-4">{t('sources') || 'Available Sources'}</h2>
-            <div className="space-y-2">
-              {streams.map((stream, index) => (
+        {/* Episodes */}
+        {!isMovie && meta?.videos && (
+          <section className="mt-6">
+            <h2 className="mb-3 text-lg font-semibold text-text">{t('episodes')}</h2>
+            <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+              {Array.from({ length: Math.max(1, season) === 0 ? 0 : 12 }, (_, i) => i + 1).map((n) => (
                 <button
-                  key={index}
-                  onClick={() => handleWatch(index)}
+                  key={n}
+                  onClick={() => setEpisode(n)}
                   className={cn(
-                    'w-full px-4 py-3 rounded-lg text-left transition-colors border',
-                    selectedStream === index
-                      ? 'bg-primary/10 border-primary text-text'
-                      : 'bg-surface border-border hover:bg-surface-hover'
+                    'rounded-lg py-2 text-sm font-medium transition-colors',
+                    episode === n ? 'bg-primary text-white' : 'bg-surface text-text-muted'
                   )}
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <span className={cn(
-                        'px-2 py-0.5 rounded text-xs font-medium',
-                        stream.behaviorHints?.notWebReady ? 'bg-warning/20 text-warning' : 'bg-success/20 text-success'
-                      )}>
-                        {stream.title || `Source ${index + 1}`}
-                      </span>
-                      {stream.quality && (
-                        <Badge variant="default">{stream.quality}</Badge>
-                      )}
-                    </div>
-                    <svg className="w-5 h-5 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </div>
+                  {n}
                 </button>
               ))}
             </div>
-          </div>
+          </section>
         )}
 
-        {subtitles.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-semibold text-text mb-4">{t('subtitles') || 'Subtitles'}</h2>
-            <div className="flex flex-wrap gap-2">
-              {subtitles.map((sub) => (
-                <Badge key={sub.id} variant="default">{sub.lang}</Badge>
-              ))}
+        {/* Next episode shortcut for series */}
+        {!isMovie && (
+          <Button
+            variant="secondary"
+            onClick={goToNextEpisode}
+            className="mt-4 h-11 w-full gap-2 rounded-[10px] sm:w-auto sm:px-6"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 4l10 8-10 8V4z" />
+            </svg>
+            {t('nextEpisode')} · S{season} E{episode + 1}
+          </Button>
+        )}
+
+        {/* Streams */}
+        <section className="mt-8">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold tracking-wide text-text sm:text-lg">
+              {t('sources')}
+            </h2>
+            <span className="text-[11px] text-text-muted">
+              {streamsLoading ? t('loading') : streams.length}
+            </span>
+          </div>
+
+          {streams.length === 0 ? (
+            <div className="rounded-xl border border-border bg-surface p-6 text-center">
+              <p className="text-sm text-text">{t('noStreams')}</p>
+              <p className="mt-1 text-xs leading-relaxed text-text-muted">
+                {t('noStreamsHint')}
+              </p>
             </div>
-          </div>
-        )}
-
-        {cast.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-semibold text-text mb-4">{t('cast') || 'Cast'}</h2>
-            <div className="rail gap-4 overflow-x-auto pb-4 -mb-4">
-              {cast.map((person: any) => (
-                <Link
-                  key={person.id}
-                  to={`/person/${person.id}`}
-                  className="rail-item w-32 flex-shrink-0"
+          ) : (
+            <div className="space-y-2">
+              {streams.map((stream, i) => (
+                <button
+                  key={`${stream.url}-${i}`}
+                  onClick={() => setPlayer(stream)}
+                  className="flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-left transition-colors hover:bg-surface-hover"
                 >
-                  <div className="relative aspect-square overflow-hidden rounded-lg bg-surface-hover mb-2">
-                    {person.profile_path ? (
-                      <img
-                        src={tmdb.getProfileUrl(person.profile_path) || ''}
-                        alt={person.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-text-muted font-medium">
-                        {person.name.charAt(0)}
-                      </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-text">
+                      {stream.title || stream.behaviorHints?.bingeGroup || `Source ${i + 1}`}
+                    </p>
+                    {stream.behaviorHints?.filename && (
+                      <p className="truncate text-xs text-text-muted">{stream.behaviorHints.filename}</p>
                     )}
                   </div>
-                  <p className="font-medium text-sm text-text truncate">{person.name}</p>
-                  {person.character && (
-                    <p className="text-xs text-text-muted truncate">{person.character}</p>
-                  )}
-                </Link>
+                  <div className="flex flex-none items-center gap-2">
+                    {stream.quality && <Badge variant="primary">{stream.quality}</Badge>}
+                    {stream.behaviorHints?.notWebReady && <Badge variant="warning">P2P</Badge>}
+                  </div>
+                </button>
               ))}
             </div>
-          </div>
+          )}
+        </section>
+
+        {/* Subtitles */}
+        {subtitles.length > 0 && (
+          <section className="mt-8">
+            <h2 className="mb-3 text-lg font-semibold text-text">{t('subtitles')}</h2>
+            <div className="flex flex-wrap gap-2">
+              {subtitles.slice(0, 24).map((sub) => (
+                <Badge key={sub.id}>{sub.title || sub.lang}</Badge>
+              ))}
+            </div>
+          </section>
         )}
 
-        {videos.length > 0 && (
-          <div className="mb-8">
-            <h2 className="text-xl font-semibold text-text mb-4">{t('trailers') || 'Trailers'}</h2>
-            <div className="rail gap-4 overflow-x-auto pb-4 -mb-4">
-              {videos.slice(0, 5).map((video: any) => (
-                <a
-                  key={video.key}
-                  href={`https://www.youtube.com/watch?v=${video.key}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rail-item w-64 flex-shrink-0"
-                >
-                  <div className="relative aspect-video overflow-hidden rounded-lg bg-gray-900 mb-2">
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <svg className="w-12 h-12 text-white/80" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M8 5v14l11-7z" />
-                      </svg>
+        {/* Cast */}
+        {cast.length > 0 && (
+          <section className="mt-8">
+            <h2 className="mb-3 text-lg font-semibold text-text">{t('cast')}</h2>
+            <div className="rail gap-3 pb-2">
+              {cast.map((person) => (
+                <div key={person.id} className="rail-item w-20 flex-none text-center">
+                  {person.profile_path ? (
+                    <img
+                      src={tmdb.getProfileUrl(person.profile_path) ?? ''}
+                      alt={person.name}
+                      loading="lazy"
+                      className="h-20 w-20 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-20 w-20 items-center justify-center rounded-full bg-surface-hover text-lg font-semibold text-text-muted">
+                      {person.name.charAt(0)}
                     </div>
+                  )}
+                  <p className="mt-2 truncate text-xs text-text">{person.name}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Trailers */}
+        {videos.length > 0 && (
+          <section className="mt-8">
+            <h2 className="mb-3 text-lg font-semibold text-text">{t('trailers')}</h2>
+            <div className="rail gap-3 pb-2">
+              {videos.slice(0, 6).map((v) => (
+                <a
+                  key={v.id}
+                  href={`https://www.youtube.com/watch?v=${v.key}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rail-item w-56 flex-none"
+                >
+                  <div className="flex aspect-video items-center justify-center rounded-lg bg-black">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" className="text-white/80">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
                   </div>
-                  <p className="font-medium text-sm text-text truncate">{video.name}</p>
+                  <p className="mt-2 truncate text-xs text-text-muted">{v.name}</p>
                 </a>
               ))}
             </div>
-          </div>
+          </section>
         )}
       </div>
 
-      {showPlayer && streams[selectedStream] && (
+      {player && (
         <PlayerModal
-          stream={streams[selectedStream]}
+          stream={player}
           subtitles={subtitles}
-          title={title || 'Unknown'}
-          onClose={() => setShowPlayer(false)}
+          title={title}
+          onNext={!isMovie ? goToNextEpisode : undefined}
+          nextLabel={!isMovie ? `${t('nextEpisode')} · S${season} E${episode + 1}` : undefined}
+          onProgress={(seconds, duration) => {
+            if (duration > 0) {
+              updateProgress({
+                type: mediaType,
+                id: rawId,
+                progress: seconds,
+                duration,
+                title,
+                poster: details?.poster_path ?? meta?.poster ?? undefined,
+                season,
+                episode,
+              });
+            }
+          }}
+          onClose={() => {
+            setPlayer(null);
+            if (autoplay) navigate(`/${mediaType}/${rawId}`, { replace: true });
+          }}
         />
       )}
-    </div>
-  );
-}
-
-interface PlayerModalProps {
-  stream: any;
-  subtitles: any[];
-  title: string;
-  type: 'movie' | 'series';
-  season: number;
-  episode: number;
-  onClose: () => void;
-}
-
-function PlayerModal({ stream, subtitles, title, onClose }: Omit<PlayerModalProps, 'type' | 'season' | 'episode'>) {
-  const { t } = useTranslation();
-  const [selectedSubtitle, setSelectedSubtitle] = useState<string>('');
-
-  const isHLS = stream.url?.includes('.m3u8');
-  const isMP4 = stream.url?.includes('.mp4');
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center">
-      <div className="relative w-full h-full max-w-7xl max-h-[90vh] mx-4 my-8">
-        <div className="absolute top-4 right-4 z-10">
-          <button
-            onClick={onClose}
-            className="p-2 rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
-          >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="w-full h-full relative">
-          {isHLS && (
-            <video
-              controls
-              autoPlay
-              playsInline
-              className="w-full h-full"
-              src={stream.url}
-            >
-              {subtitles.map(sub => (
-                <track
-                  key={sub.id}
-                  kind="subtitles"
-                  src={sub.url}
-                  srcLang={sub.lang}
-                  label={sub.title || sub.lang}
-                  default={sub.lang === 'en'}
-                />
-              ))}
-            </video>
-          )}
-          {isMP4 && (
-            <video
-              controls
-              autoPlay
-              playsInline
-              className="w-full h-full"
-              src={stream.url}
-            >
-              {subtitles.map(sub => (
-                <track
-                  key={sub.id}
-                  kind="subtitles"
-                  src={sub.url}
-                  srcLang={sub.lang}
-                  label={sub.title || sub.lang}
-                  default={sub.lang === 'en'}
-                />
-              ))}
-            </video>
-          )}
-          {!isHLS && !isMP4 && (
-            <div className="w-full h-full flex items-center justify-center">
-              <iframe
-                src={stream.url}
-                className="w-full h-full"
-                allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-                allowFullScreen
-              />
-            </div>
-          )}
-        </div>
-
-        <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
-          <h3 className="text-white font-medium">{title}</h3>
-          <div className="flex items-center gap-2">
-            {subtitles.length > 0 && (
-              <select
-                value={selectedSubtitle}
-                onChange={(e) => setSelectedSubtitle(e.target.value)}
-                className="px-3 py-1 rounded bg-black/50 text-white text-sm"
-              >
-                <option value="">{t('subtitles') || 'Subtitles'} (Off)</option>
-                {subtitles.map(sub => (
-                  <option key={sub.id} value={sub.id}>{sub.title || sub.lang}</option>
-                ))}
-              </select>
-            )}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

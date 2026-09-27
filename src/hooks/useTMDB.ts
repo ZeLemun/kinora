@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { tmdb, type TMDBMovie, type TMDBTVShow, type TMDBDetails, type TMDBGenre, type TMDBResponse } from '../services/tmdb';
+import { omdb, imdb, type OMDBMovie, type OMDBResponse, type IMDBMovie, type IMDBResponse } from '../services/omdb-imdb';
 
 export function useTrending(type: 'movie' | 'tv' = 'movie', timeWindow: 'day' | 'week' = 'week') {
   return useQuery({
@@ -85,5 +86,52 @@ export function useFindByIMDb(imdbId: string) {
   });
 }
 
-export { tmdb };
-export type { TMDBMovie, TMDBTVShow, TMDBDetails, TMDBGenre, TMDBResponse };
+// OMDb API hooks
+export function useOMDBByIMDbId(imdbId: string) {
+  return useQuery({
+    queryKey: ['omdb', 'byId', imdbId],
+    queryFn: () => omdb.getByIMDbId(imdbId),
+    enabled: !!imdbId,
+    staleTime: 1000 * 60 * 60 * 24,
+  });
+}
+
+export function useOMDBSearch(query: string, type?: 'movie' | 'series' | 'episode', page = 1) {
+  return useQuery({
+    queryKey: ['omdb', 'search', query, type, page],
+    queryFn: () => omdb.search(query, type, page),
+    enabled: query.length >= 2,
+    staleTime: 1000 * 60 * 10,
+  });
+}
+
+// IMDb API hooks
+export function useIMDBSearch(query: string) {
+  return useQuery({
+    queryKey: ['imdb', 'search', query],
+    queryFn: () => imdb.search(query),
+    enabled: query.length >= 2,
+    staleTime: 1000 * 60 * 10,
+  });
+}
+
+export function useIMDBDetails(id: string) {
+  return useQuery({
+    queryKey: ['imdb', 'details', id],
+    queryFn: () => imdb.getDetails(id),
+    enabled: !!id,
+    staleTime: 1000 * 60 * 60 * 24,
+  });
+}
+
+export function useIMDBCredits(id: string) {
+  return useQuery({
+    queryKey: ['imdb', 'credits', id],
+    queryFn: () => imdb.getCredits(id),
+    enabled: !!id,
+    staleTime: 1000 * 60 * 60 * 24,
+  });
+}
+
+export { tmdb, omdb, imdb };
+export type { TMDBMovie, TMDBTVShow, TMDBDetails, TMDBGenre, TMDBResponse, OMDBMovie, OMDBResponse, IMDBMovie, IMDBResponse };
