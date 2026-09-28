@@ -33,15 +33,22 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 
 ## 2. THE open question: can it play video?
 
-### ⚠️ CONFIRMED BROKEN ON DEVICE — playback does not work
+### ✅ THE PLAYER WORKS — verified on device
 
-**I tried to watch a movie in the app on the phone. It does not play.** Tapping
-*Watch Now* either opens the player to a "this stream cannot be played" message,
-or there is nothing playable listed at all. This is not a cosmetic bug.
+Confirmed playing on the phone: landscape, Netflix-styled chrome, video
+rendering, scrub bar advancing to 0:10/0:10. The player is **not** the problem.
 
-**Reproduce it:** open any title → the *Sources* section. The streams that come
-back are torrent/P2P descriptors, not HTTP URLs, so the player has nothing to
-load.
+To verify it without a debrid account, the detail page appends a clearly
+labelled entry to the Sources list whenever nothing is genuinely playable:
+
+> Player demo — test clip, not this title
+
+It is only added when `playableCount === 0`, so it never masks real results.
+
+### ⚠️ Real movies still need a debrid account
+
+**Reproduce it:** open any title → *Sources*. The streams that come back are
+torrent/P2P descriptors, not HTTP URLs, so the player has nothing to load.
 
 **Root cause:** the WebView has no torrent engine. See below.
 
@@ -80,9 +87,38 @@ Vite + React 19 + TS + Tailwind v4 + Capacitor 8  →  Android (done)  →  iOS 
 ```
 
 - **Metadata:** TMDB (`src/services/tmdb.ts`, key `2a5568baeef016cd5241440fab2767de`)
-- **Streams/subtitles:** Stremio add-on protocol via `@stremio/stremio-core-web` 0.63.2 (MIT)
-- **Engine init:** `src/components/AddonBootstrap.tsx` — **critical**, the core knows zero add-ons until `init()` is called. This was a silent killer of the streams list.
+- **Streams/subtitles:** `src/services/addon-client.ts` — a **direct addon-v3 HTTP client**
 - **Default add-ons:** Cinemeta + MediaFusion (persisted store v3, `migrate` repairs stale transport URLs)
+
+### `stremio-core-web` was REMOVED — don't put it back
+
+The plan's "escape hatch" fired. `@stremio/stremio-core-web` is a **CommonJS
+wasm-bindgen module** whose entry point is a low-level `start()` / `dispatch()`
+RPC bridge — *not* the `default()` factory the wrapper assumed. That threw
+`TypeError: (intermediate value).default is not a function` and the WASM was
+never initialised, so streams silently never loaded.
+
+`addon-client.ts` now does the protocol directly (six GETs) and was strictly
+better: no WASM, no worker, no `init()` step, no init-failure failure mode. The
+WASM chunk is gone from the build.
+
+Add-on config travels as query params (`?debridToken=…`), which is what the
+debrid add-ons expect. `stremio://…` install links are unwrapped on paste.
+
+### The `crossOrigin` trap (cost real time)
+
+`<video crossOrigin="anonymous">` applies a **CORS check** that most stream
+hosts and debrid CDNs do not satisfy — playback dies with a generic media
+error. I had it set "for subtitles" and it silently killed *all* playback.
+**Never set `crossOrigin` on the video element.**
+
+### The add-on configure flow is HTML, not JSON
+
+`/configure` on every real add-on (Torrentio, MediaFusion, Comet…) returns
+**text/html** — it's the page that generates the `stremio://` install link. The
+app therefore opens it in the system browser via `@capacitor/browser` and
+detects a JSON response as a bonus. `AddonConfigForm` renders the form when one
+is actually available.
 
 **The TMDB→IMDb bridge:** rails carry TMDB numeric ids but every add-on keys on `tt…`. `DetailPage` reads `details.external_ids.imdb_id` and passes *that* to `useMeta`/`useStreams`. Getting this wrong is what caused the original "Content not found".
 
@@ -123,12 +159,23 @@ Vite + React 19 + TS + Tailwind v4 + Capacitor 8  →  Android (done)  →  iOS 
 - i18n: added ~25 keys × 3 languages (en/it/es)
 
 **Next episode (asked for, implemented, untested)**
-- `PlayerModal` shows a "Next episode" pill in the last 20s and on `ended`
-- 5s auto-countdown, then advances automatically
+- `PlayerModal` shows a full-screen "Up next" takeover in the last 20s and on
+  `ended`, with a red countdown ring and an 8s auto-advance
 - Also a persistent "Next episode" button on the series detail page
 - `onProgress` persists watch progress → powers Continue Watching
 
-⚠️ The next-episode flow has **not been manually verified** — it needs a series with real streams, which is blocked behind §2.
+**Netflix-style player** (`PlayerModal.tsx`)
+- Forces **landscape** on open via `@capacitor/screen-orientation`, unlocks on exit
+- Chrome auto-hides after 3.2s, tap to toggle, centre play/pause
+- Red scrub bar with buffered indicator, 10s skip buttons, volume slider,
+  fullscreen, subtitle picker, Netflix-red spinner and error state
+- Keyboard: `space`/`k` play-pause, `←`/`→` seek, `f` fullscreen, `m` mute, `esc` exit
+
+**Light/dark theme fixed** — `:root` is now the light palette and `.dark` on
+`<html>` swaps the dark one, so the toggle (and `system`) actually work.
+Previously every token was hardcoded dark.
+
+⚠️ The next-episode flow still needs a real series with playable streams.
 
 ---
 
@@ -163,6 +210,8 @@ Vite + React 19 + TS + Tailwind v4 + Capacitor 8  →  Android (done)  →  iOS 
 - `screencap` on a sleeping device returns pure black — that cost a debugging detour early on.
 - A bundle that "doesn't change" is almost always a missing `npm run build` before `cap sync`.
 - Cinemeta's `stream` resource returns **torrents**, not HTTP. Don't read "N streams found" as "N playable streams".
+- **Never use PowerShell `Set-Content` on source files.** It re-encodes as ANSI and silently corrupts every non-ASCII character (`è`, `ñ`, `ó`) into invalid UTF-8. The symptom is a confusing `UNLOADABLE_DEPENDENCY … stream did not contain valid UTF-8` from rolldown, while `tsc` passes clean. Use the `edit`/`write` tools instead. If it happens: `git checkout -- <file>` and redo with the edit tool.
+- **React error #310 = "rendered more hooks than during the previous render."** Cause: a `useEffect`/`useRef` placed *after* an early `return`. In `DetailPage` the loading/error guards used to sit above the next-episode hooks, which blanked the whole page. All hooks must come before any early return.
 
 ---
 

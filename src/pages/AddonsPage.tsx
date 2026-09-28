@@ -1,25 +1,21 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Browser } from '@capacitor/browser';
+import { Capacitor } from '@capacitor/core';
 import { useTranslation } from '../hooks/useTranslation';
 import { useAppStore } from '../store/app-store';
 import { Button, Input, Card, Badge } from '../components/ui/basic';
 import { EmptyState } from '../components/ErrorFallback';
 import { cn } from '../utils/cn';
+import { fetchManifest, resourceNames } from '../services/addon-client';
 import type { AddonConfig, InstalledAddon, Manifest } from '../addon-types';
 import { AddonConfigForm } from '../components/AddonConfigForm';
-
-/** Flattens the two manifest resource shapes into plain names. */
-function resourceNames(addon: Pick<InstalledAddon, 'manifest'>): string[] {
-  return (addon.manifest.resources ?? [])
-    .map((r) => (typeof r === 'string' ? r : r.name))
-    .filter((n): n is string => typeof n === 'string' && n.length > 0);
-}
 
 const SUGGESTED = [
   {
     name: 'AIOStreams',
     url: 'https://aiostreams.elfhosted.com',
-    desc: 'Meta add-on that aggregates the others. Configure a debrid provider.',
+    desc: 'Meta add-on aggregating the others. Configure a debrid provider.',
   },
   {
     name: 'Comet',
@@ -50,52 +46,24 @@ const SUGGESTED = [
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
 
-/** Fetches a Stremio manifest and normalises it into our Manifest shape. */
-async function fetchManifest(input: string): Promise<Manifest> {
-  const url = input.trim();
-  if (!url) throw new Error('Empty URL');
-  const candidate = url.endsWith('.json') ? url : `${url.replace(/\/+$/, '')}/manifest.json`;
-
-  const res = await fetch(candidate, { signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const raw = (await res.json()) as Record<string, unknown>;
-
-  if (typeof raw.id !== 'string' || !raw.id) throw new Error('Manifest has no id');
-  if (!Array.isArray(raw.resources)) throw new Error('Manifest has no resources');
-
-  return {
-    id: raw.id,
-    version: typeof raw.version === 'string' ? raw.version : '0.0.0',
-    name: typeof raw.name === 'string' ? raw.name : raw.id,
-    description: typeof raw.description === 'string' ? raw.description : '',
-    resources: raw.resources.filter((r): r is string => typeof r === 'string'),
-    types: Array.isArray(raw.types) ? (raw.types.filter((x) => typeof x === 'string') as string[]) : [],
-    idPrefixes: Array.isArray(raw.idPrefixes)
-      ? (raw.idPrefixes.filter((x) => typeof x === 'string') as string[])
-      : undefined,
-    catalogs: Array.isArray(raw.catalogs)
-      ? (raw.catalogs.filter((c) => c && typeof c === 'object') as Manifest['catalogs'])
-      : undefined,
-    behaviorHints:
-      raw.behaviorHints && typeof raw.behaviorHints === 'object'
-        ? (raw.behaviorHints as Manifest['behaviorHints'])
-        : undefined,
-  };
-}
-
 export function AddonsPage() {
   const { t } = useTranslation();
   const { installedAddons, addAddon, removeAddon, toggleAddon, setAddonConfig } = useAppStore();
+
   const [url, setUrl] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [manifest, setManifest] = useState<Manifest | null>(null);
   const [error, setError] = useState<string | null>(null);
+
   const [configuring, setConfiguring] = useState<string | null>(null);
   const [configFields, setConfigFields] = useState<AddonConfig[] | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
 
   const installedUrls = new Set(installedAddons.map((a) => a.transportUrl.replace(/\/+$/, '')));
   const isInstalled = (transport: string) => installedUrls.has(transport.replace(/\/+$/, ''));
+
+  const transportOf = (input: string) =>
+    input.trim().replace(/\/+$/, '').replace(/\/manifest\.json$/, '');
 
   const check = async (value: string) => {
     if (!value.trim()) return;
@@ -113,38 +81,55 @@ export function AddonsPage() {
 
   const install = () => {
     if (!manifest) return;
-    const transportUrl = url.trim().replace(/\/+$/, '').replace(/\/manifest\.json$/, '');
-    addAddon({ manifest, transportUrl, enabled: true });
+    addAddon({ manifest, transportUrl: transportOf(url), enabled: true });
     setUrl('');
     setManifest(null);
     setStatus('idle');
   };
 
-  /** Opens an add-on's /configure manifest and shows its form. */
+  /**
+   * Most add-ons serve /configure as an HTML page (that is what produces the
+   * stremio:// install link), so we open it in a browser rather than trying to
+   * render it. A few do return JSON — support both.
+   */
   const openConfig = async (transportUrl: string) => {
     setConfiguring(transportUrl);
     setConfigFields(null);
     setConfigError(null);
+    const target = `${transportUrl.replace(/\/+$/, '')}/configure`;
+
     try {
-      const res = await fetch(`${transportUrl.replace(/\/+$/, '')}/configure`, {
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { config?: AddonConfig[] };
-      if (!Array.isArray(data.config) || data.config.length === 0) {
-        throw new Error(t('noConfigFields'));
+      const res = await fetch(target);
+      const type = res.headers.get('content-type') ?? '';
+      if (type.includes('json')) {
+        const data = (await res.json()) as { config?: AddonConfig[] };
+        if (Array.isArray(data.config) && data.config.length > 0) {
+          setConfigFields(data.config);
+          return;
+        }
       }
-      setConfigFields(data.config);
-    } catch (err) {
-      setConfigError(err instanceof Error ? err.message : 'Failed to load configuration');
+      // HTML configurator: hand it to the system browser.
+      if (Capacitor.isNativePlatform()) {
+        await Browser.open({ url: target });
+      } else {
+        window.open(target, '_blank', 'noopener,noreferrer');
+      }
+      setConfigError(null);
+    } catch {
+      setConfigError(null);
+      if (Capacitor.isNativePlatform()) {
+        await Browser.open({ url: target }).catch(() => undefined);
+      } else {
+        window.open(target, '_blank', 'noopener,noreferrer');
+      }
     }
   };
 
   return (
     <div className="px-4 py-5">
       <div className="mb-4 flex items-center gap-3">
-        <Link to="/settings" className="rounded-full p-2 text-text-muted hover:bg-surface">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <Link to="/settings" className="-ml-1 rounded-full p-1.5 text-text-muted hover:bg-surface">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </Link>
@@ -197,7 +182,7 @@ export function AddonsPage() {
                 <p className="text-xs leading-relaxed text-text-muted">{manifest.description}</p>
               )}
               <div className="flex flex-wrap gap-1">
-                {resourceNames({ manifest }).map((r) => (
+                {resourceNames(manifest).map((r) => (
                   <Badge key={r} variant="primary">
                     {r}
                   </Badge>
@@ -236,8 +221,9 @@ export function AddonsPage() {
             />
           ) : (
             <ul className="space-y-2">
-              {installedAddons.map((addon) => {
+              {installedAddons.map((addon: InstalledAddon) => {
                 const active = addon.enabled !== false;
+                const configured = Object.keys(addon.config ?? {}).length > 0;
                 return (
                   <li
                     key={addon.transportUrl}
@@ -251,13 +237,11 @@ export function AddonsPage() {
                         <p className="truncate text-sm font-medium text-text">{addon.manifest.name}</p>
                         <p className="truncate text-xs text-text-muted">{addon.transportUrl}</p>
                       </div>
-                      <Badge variant={active ? 'success' : 'default'}>
-                        {active ? t('enable') : t('disable')}
-                      </Badge>
+                      {configured && <Badge variant="primary">Configured</Badge>}
                     </div>
 
                     <div className="mt-2 flex flex-wrap gap-1">
-                      {resourceNames(addon).map((r) => (
+                      {resourceNames(addon.manifest).map((r) => (
                         <Badge key={r}>{r}</Badge>
                       ))}
                     </div>
@@ -291,33 +275,27 @@ export function AddonsPage() {
                       </Button>
                     </div>
 
-                    {configuring === addon.transportUrl && (
-                      <div className="mt-2">
-                        {configError ? (
-                          <p className="text-xs text-error">
-                            {t('error')}: {configError}
-                          </p>
-                        ) : configFields ? (
-                          <AddonConfigForm
-                            transportUrl={addon.transportUrl}
-                            fields={configFields}
-                            initial={addon.config ?? {}}
-                            saveLabel={t('save')}
-                            cancelLabel={t('close')}
-                            onCancel={() => {
-                              setConfiguring(null);
-                              setConfigFields(null);
-                            }}
-                            onSave={(cfg) => {
-                              setAddonConfig(addon.transportUrl, cfg);
-                              setConfiguring(null);
-                              setConfigFields(null);
-                            }}
-                          />
-                        ) : (
-                          <p className="text-xs text-text-muted">{t('loading')}</p>
-                        )}
-                      </div>
+                    {configuring === addon.transportUrl && configFields && (
+                      <AddonConfigForm
+                        transportUrl={addon.transportUrl}
+                        fields={configFields}
+                        initial={addon.config ?? {}}
+                        saveLabel={t('save')}
+                        cancelLabel={t('close')}
+                        onCancel={() => {
+                          setConfiguring(null);
+                          setConfigFields(null);
+                        }}
+                        onSave={(cfg) => {
+                          setAddonConfig(addon.transportUrl, cfg);
+                          setConfiguring(null);
+                          setConfigFields(null);
+                        }}
+                      />
+                    )}
+
+                    {configError && configuring === addon.transportUrl && (
+                      <p className="mt-2 text-xs text-error">{configError}</p>
                     )}
                   </li>
                 );
@@ -330,35 +308,32 @@ export function AddonsPage() {
         <Card className="space-y-3 p-4">
           <h2 className="text-base font-semibold text-text">{t('discoverAddons')}</h2>
           <ul className="space-y-2">
-            {SUGGESTED.map((addon) => {
-              const already = isInstalled(addon.url);
-              return (
-                <li
-                  key={addon.name}
-                  className="flex items-center justify-between gap-3 rounded-lg bg-surface p-3"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-text">{addon.name}</p>
-                    <p className="truncate text-xs text-text-muted">{addon.desc}</p>
-                  </div>
-                  {already ? (
-                    <Badge variant="success">{t('installed')}</Badge>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="flex-none"
-                      onClick={() => {
-                        setUrl(addon.url);
-                        check(addon.url);
-                      }}
-                    >
-                      {t('add')}
-                    </Button>
-                  )}
-                </li>
-              );
-            })}
+            {SUGGESTED.map((addon) => (
+              <li
+                key={addon.name}
+                className="flex items-center justify-between gap-3 rounded-lg bg-surface p-3"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-text">{addon.name}</p>
+                  <p className="truncate text-xs text-text-muted">{addon.desc}</p>
+                </div>
+                {isInstalled(addon.url) ? (
+                  <Badge variant="success">{t('installed')}</Badge>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="flex-none"
+                    onClick={() => {
+                      setUrl(addon.url);
+                      check(addon.url);
+                    }}
+                  >
+                    {t('add')}
+                  </Button>
+                )}
+              </li>
+            ))}
           </ul>
         </Card>
       </div>

@@ -10,7 +10,6 @@ import { AddonsPage } from './pages/AddonsPage';
 import { cn } from './utils/cn';
 import { useAppStore } from './store/app-store';
 import { useEffect } from 'react';
-import { AddonBootstrap } from './components/AddonBootstrap';
 import { useIsLandscape, useKeyboardOpen } from './hooks/useViewport';
 
 interface TabConfig {
@@ -148,7 +147,6 @@ function App() {
 
   return (
     <TranslationProvider>
-      <AddonBootstrap />
       <AppRoutes />
     </TranslationProvider>
   );

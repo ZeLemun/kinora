@@ -1,6 +1,30 @@
 @import "tailwindcss";
 
+/*
+  Theme tokens.
+  :root is the LIGHT palette; `.dark` on <html> swaps in the dark one.
+  The store toggles that class, so the explicit and 'system' themes both work.
+*/
 @theme {
+  --color-primary: hsl(272, 62%, 48%);
+  --color-primary-hover: hsl(272, 66%, 40%);
+  --color-background: hsl(240, 20%, 99%);
+  --color-surface: hsl(240, 16%, 96%);
+  --color-surface-hover: hsl(240, 14%, 92%);
+  --color-text: hsl(240, 18%, 12%);
+  --color-text-muted: hsl(240, 8%, 42%);
+  --color-border: hsl(240, 12%, 86%);
+  --color-error: hsl(0, 72%, 48%);
+  --color-success: hsl(147, 55%, 34%);
+  --color-netflix: hsl(0, 78%, 50%);
+
+  --safe-area-inset-top: env(safe-area-inset-top);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom);
+  --safe-area-inset-left: env(safe-area-inset-left);
+  --safe-area-inset-right: env(safe-area-inset-right);
+}
+
+.dark {
   --color-primary: hsla(272, 62%, 55%, 1);
   --color-primary-hover: hsla(272, 70%, 66%, 1);
   --color-background: hsla(240, 12%, 7%, 1);
@@ -11,11 +35,6 @@
   --color-border: hsla(240, 8%, 20%, 1);
   --color-error: hsla(0, 72%, 58%, 1);
   --color-success: hsla(147, 55%, 45%, 1);
-
-  --safe-area-inset-top: env(safe-area-inset-top);
-  --safe-area-inset-bottom: env(safe-area-inset-bottom);
-  --safe-area-inset-left: env(safe-area-inset-left);
-  --safe-area-inset-right: env(safe-area-inset-right);
 }
 
 @layer base {

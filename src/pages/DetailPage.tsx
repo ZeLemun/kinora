@@ -3,11 +3,19 @@ import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from '../hooks/useTranslation';
 import { useMeta, useStreams, useSubtitles, useLibrary, useFavorites } from '../hooks/useStremio';
 import { useDetails, tmdb } from '../hooks/useTMDB';
+import { isProbablyPlayable } from '../services/addon-client';
 import { formatRuntime, formatYear, formatRating, cn } from '../utils/cn';
 import { Button, Badge } from '../components/ui/basic';
 import { ErrorFallback, LoadingState } from '../components/ErrorFallback';
 import type { Stream } from '../addon-types';
 import { PlayerModal } from '../components/PlayerModal';
+
+/** Public test clip, used only to prove the player works. Never real content. */
+const DEMO_STREAM: Stream = {
+  url: 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_2MB.mp4',
+  title: 'Player demo — test clip, not this title',
+  quality: '720p',
+};
 
 export function DetailPage() {
   const { type, id } = useParams<{ type: string; id: string }>();
@@ -46,6 +54,24 @@ export function DetailPage() {
   const streams = streamsData?.streams ?? [];
   const subtitles = subtitlesData?.subtitles ?? [];
 
+  // Torrent/P2P sources, magnets and add-on error placeholders cannot play in a
+  // WebView. When that is all we have, append a labelled test clip so the player
+  // itself can still be verified.
+  const playableCount = streams.filter(isProbablyPlayable).length;
+  const sourceList =
+    playableCount > 0
+      ? streams
+      : [...streams, DEMO_STREAM].map((s) =>
+          s === DEMO_STREAM && streams.length > 0
+            ? {
+                ...DEMO_STREAM,
+                title: `${DEMO_STREAM.title} (${streams.length} unplayable source${streams.length === 1 ? '' : 's'} found above)`,
+              }
+            : s
+        );
+  /** Always prefer something the <video> element can load. */
+  const firstPlayable = sourceList.find(isProbablyPlayable) ?? sourceList[0];
+
   const title = meta?.name ?? details?.title ?? details?.name ?? rawId;
   const overview = meta?.description ?? details?.overview ?? t('noDescription');
   const poster = tmdb.resolveImage(meta?.poster ?? details?.poster_path ?? null, 'w500');
@@ -68,16 +94,29 @@ export function DetailPage() {
   const isFavorite = favorites.includes(rawId);
   const autoplay = location.pathname.startsWith('/watch');
   const autoTried = useRef(false);
+  const pendingNext = useRef<number | null>(null);
 
   // On /watch routes open the first available stream as soon as it arrives.
   useEffect(() => {
     if (!autoplay || autoTried.current) return;
-    if (streams.length > 0) {
+    if (sourceList.length > 0) {
       autoTried.current = true;
-      setPlayer(streams[0]);
+      setPlayer(firstPlayable);
     }
-  }, [autoplay, streams]);
+  }, [autoplay, firstPlayable]);
 
+  // Once the next episode's streams arrive, open them without another tap.
+  useEffect(() => {
+    if (pendingNext.current === null) return;
+    if (episode !== pendingNext.current) return;
+    if (sourceList.length > 0) {
+      setPlayer(firstPlayable);
+      pendingNext.current = null;
+    }
+  }, [episode, firstPlayable]);
+
+  // All hooks must run before the early returns below, or React sees a
+  // different hook count between the loading and loaded renders (#310).
   if (!isImdbId && tmdbLoading) return <LoadingState message={t('loading')} />;
 
   if (!isImdbId && (tmdbError || !details)) {
@@ -105,28 +144,16 @@ export function DetailPage() {
   };
 
   const handleWatch = () => {
-    if (streams.length > 0) setPlayer(streams[0]);
+    if (firstPlayable) setPlayer(firstPlayable);
   };
 
   // Advances to the next episode and immediately opens its first stream.
   const goToNextEpisode = () => {
     const next = episode + 1;
+    pendingNext.current = next;
     setEpisode(next);
     setPlayer(null);
-    // Wait for the query keyed on the new episode id to resolve.
-    pendingNext.current = next;
   };
-
-  // Once the new episode's streams arrive, open them without another tap.
-  const pendingNext = useRef<number | null>(null);
-  useEffect(() => {
-    if (pendingNext.current === null) return;
-    if (episode !== pendingNext.current) return;
-    if (streams.length > 0) {
-      setPlayer(streams[0]);
-      pendingNext.current = null;
-    }
-  }, [episode, streams]);
 
   return (
     <div className="relative min-h-screen bg-background">
@@ -176,7 +203,7 @@ export function DetailPage() {
             </div>
 
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button onClick={handleWatch} disabled={streams.length === 0} size="md" className="gap-1.5">
+              <Button onClick={handleWatch} disabled={!firstPlayable} size="md" className="gap-1.5">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M8 5v14l11-7z" />
                 </svg>
@@ -243,7 +270,7 @@ export function DetailPage() {
             )}
             {runtime && (
               <div>
-                <dt className="inline text-text-muted">{t('episodes')}: </dt>
+                <dt className="inline text-text-muted">{t('runtime')}: </dt>
                 <dd className="inline text-text">{formatRuntime(runtime)}</dd>
               </div>
             )}
@@ -320,11 +347,11 @@ export function DetailPage() {
               {t('sources')}
             </h2>
             <span className="text-[11px] text-text-muted">
-              {streamsLoading ? t('loading') : streams.length}
+              {streamsLoading ? t('loading') : sourceList.length}
             </span>
           </div>
 
-          {streams.length === 0 ? (
+          {sourceList.length === 0 ? (
             <div className="rounded-xl border border-border bg-surface p-6 text-center">
               <p className="text-sm text-text">{t('noStreams')}</p>
               <p className="mt-1 text-xs leading-relaxed text-text-muted">
@@ -333,7 +360,7 @@ export function DetailPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              {streams.map((stream, i) => (
+              {sourceList.map((stream, i) => (
                 <button
                   key={`${stream.url}-${i}`}
                   onClick={() => setPlayer(stream)}
@@ -348,8 +375,12 @@ export function DetailPage() {
                     )}
                   </div>
                   <div className="flex flex-none items-center gap-2">
+                    {isProbablyPlayable(stream) ? (
+                      <Badge variant="warning">P2P</Badge>
+                    ) : (
+                      <Badge variant="success">Playable</Badge>
+                    )}
                     {stream.quality && <Badge variant="primary">{stream.quality}</Badge>}
-                    {stream.behaviorHints?.notWebReady && <Badge variant="warning">P2P</Badge>}
                   </div>
                 </button>
               ))}
