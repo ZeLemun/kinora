@@ -521,7 +521,12 @@ function handleTmdbProxy(req, res, pathname) {
 
   // Extract the TMDB path from /api/tmdb/...
   const tmdbPath = pathname.slice('/api/tmdb'.length);
-  const tmdbKey = '2a5568baeef016cd5241440fab2767de';
+  const tmdbKey = process.env.TMDB_API_KEY || '';
+  if (!tmdbKey) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'TMDB_API_KEY is not set' }));
+    return;
+  }
   const tmdbBase = 'https://api.themoviedb.org/3';
 
   const targetUrl = new URL(tmdbPath, tmdbBase);

@@ -8,6 +8,7 @@ interface ImmersivePlugin {
   enter(): Promise<void>;
   exit(): Promise<void>;
   reapply(): Promise<void>;
+  setLandscape(options: { locked: boolean }): Promise<void>;
 }
 
 const Immersive = registerPlugin<ImmersivePlugin>('Immersive');
@@ -17,7 +18,7 @@ export const immersive = {
     try {
       await Immersive.enter();
     } catch {
-      // Not available on web; StatusBar.hide() still covers the status bar.
+      // Not available on web; the status bar is covered by the dark theme.
     }
   },
   async exit() {
@@ -32,6 +33,14 @@ export const immersive = {
       await Immersive.reapply();
     } catch {
       /* no-op */
+    }
+  },
+  /** Forces landscape while `locked`, otherwise hands control back to the sensor. */
+  async setLandscape(locked: boolean) {
+    try {
+      await Immersive.setLandscape({ locked });
+    } catch {
+      /* no-op on web */
     }
   },
 };

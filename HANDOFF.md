@@ -86,7 +86,23 @@ Bundled-first Capacitor app. No server needed for playback (the Server URL setti
 Vite + React 19 + TS + Tailwind v4 + Capacitor 8  →  Android (done)  →  iOS (next)
 ```
 
-- **Metadata:** TMDB (`src/services/tmdb.ts`, key `2a5568baeef016cd5241440fab2767de`)
+- **Metadata:** TMDB (`src/services/tmdb.ts`) and OMDb (`src/services/omdb.ts`).
+  Keys live in `.env` (gitignored) as `VITE_TMDB_API_KEY` / `VITE_OMDB_API_KEY`;
+  see `.env.example`. The TMDB v4 JWT is expired (its `nbf` was May 2026) and
+  every v4 call 404s, so the app uses the v3 `api_key` only.
+- **Sports (`src/services/sports.ts`):** live scores and fixtures from ESPN's
+  public web API (`site.web.api.espn.com` — note the host; `site.api.espn.com`
+  answers 403 to non-browser clients). League tables and club crests from
+  TheSportsDB's free key `3`. Both send `Access-Control-Allow-Origin: *`, so
+  the app needs no server for either.
+- **Playback sources (`src/services/sources.ts`, `src/services/probe.ts`):**
+  Internet Archive public-domain films, plus a YouTube trailer embed as the
+  always-available fallback. Candidates are health-checked with a 1 KB range
+  request before being handed to `<video>`; a `fetch` network failure is
+  reported as "unverified" rather than "dead", because that is usually CORS and
+  a `<video>` without `crossOrigin` is not CORS-checked.
+- **No add-on layer.** No marketplace, no torrent, no P2P, no external catalogs.
+  A `MediaSource` is a plain URL that a `<video>` can play directly.
 - **Streams/subtitles:** `src/services/addon-client.ts` — a **direct addon-v3 HTTP client**
 - **Default add-ons:** Cinemeta + MediaFusion (persisted store v3, `migrate` repairs stale transport URLs)
 

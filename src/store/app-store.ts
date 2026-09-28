@@ -1,192 +1,249 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { LibraryItem, InstalledAddon } from '../addon-types';
+import { useShallow } from 'zustand/react/shallow';
 
-interface AppState {
-  theme: 'dark' | 'light' | 'system';
-  language: string;
-  installedAddons: InstalledAddon[];
-  library: LibraryItem[];
-  continueWatching: LibraryItem[];
-  favorites: string[];
-  searchHistory: string[];
-  setTheme: (theme: 'dark' | 'light' | 'system') => void;
-  setLanguage: (lang: string) => void;
-  addAddon: (addon: InstalledAddon) => void;
-  removeAddon: (transportUrl: string) => void;
-  toggleAddon: (transportUrl: string) => void;
-  setAddonConfig: (transportUrl: string, config: Record<string, unknown>) => void;
-  toggleFavorite: (id: string) => void;
-  addToLibrary: (item: LibraryItem) => void;
-  removeFromLibrary: (type: string, id: string) => void;
-  updateProgress: (type: string, id: string, progress: number, duration: number, season?: number, episode?: number) => void;
-  addSearchHistory: (query: string) => void;
-  clearSearchHistory: () => void;
+/* ------------------------------------------------------------------ */
+/*  Media model                                                        */
+/* ------------------------------------------------------------------ */
+
+export type MediaType = 'movie' | 'series';
+
+export interface Episode {
+  id: string;
+  season: number;
+  episode: number;
+  title: string;
+  overview: string;
+  runtime: number; // minutes
+  still?: string; // 16:9 image
+  airDate?: string;
 }
 
-const defaultAddons: InstalledAddon[] = [
-  {
-    manifest: {
-      id: 'com.linvo.cinemeta',
-      version: '3.0.14',
-      name: 'Cinemeta',
-      description: 'The official addon for movie and series catalogs',
-      resources: ['catalog', 'meta', 'stream', 'subtitles', 'addon_catalog'],
-      types: ['movie', 'series'],
-      idPrefixes: ['tt'],
-      catalogs: [
-        { type: 'movie', id: 'top', name: 'Popular', extra: [{ name: 'genre' }, { name: 'search' }, { name: 'skip' }], genres: ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'War', 'Western'] },
-        { type: 'series', id: 'top', name: 'Popular', extra: [{ name: 'genre' }, { name: 'search' }, { name: 'skip' }], genres: ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'War', 'Western', 'Reality-TV', 'Talk-Show', 'Game-Show'] },
-        { type: 'movie', id: 'year', name: 'New', extra: [{ name: 'genre', isRequired: true }, { name: 'skip' }], genres: Array.from({ length: 107 }, (_, i) => String(2026 - i)) },
-        { type: 'series', id: 'year', name: 'New', extra: [{ name: 'genre', isRequired: true }, { name: 'skip' }], genres: Array.from({ length: 67 }, (_, i) => String(2026 - i)) },
-        { type: 'movie', id: 'imdbRating', name: 'Featured', extra: [{ name: 'genre' }, { name: 'skip' }], genres: ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'War', 'Western'] },
-        { type: 'series', id: 'imdbRating', name: 'Featured', extra: [{ name: 'genre' }, { name: 'skip' }], genres: ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Family', 'Fantasy', 'History', 'Horror', 'Mystery', 'Romance', 'Sci-Fi', 'Thriller', 'War', 'Western', 'Reality-TV', 'Talk-Show', 'Game-Show'] },
-        { type: 'series', id: 'last-videos', name: 'Last videos', extra: [{ name: 'lastVideosIds', isRequired: true, optionsLimit: 100 }] },
-        { type: 'series', id: 'calendar-videos', name: 'Calendar videos', extra: [{ name: 'calendarVideosIds', isRequired: true, optionsLimit: 100 }] },
-      ],
-      behaviorHints: { configurable: false },
-    },
-    transportUrl: 'https://v3-cinemeta.strem.io',
-    enabled: true,
-  },
-  {
-    manifest: {
-      id: 'stremio.addons.mediafusion|elfhosted',
-      version: '1.0.0',
-      name: 'MediaFusion',
-      description: 'Aggregates direct HTTP streaming sources (no torrent needed)',
-      resources: [{ name: 'stream', types: ['movie', 'series', 'tv'], idPrefixes: ['tt', 'tmdb:', 'mf', 'dl'] }],
-      types: ['movie', 'series', 'tv'],
-      idPrefixes: ['tt', 'tmdb:', 'mf', 'dl'],
-      behaviorHints: { p2p: false, configurable: true },
-    },
-    // NB: MediaFusion only serves streams under /stremio — the bare host
-    // returns an empty list for every id.
-    transportUrl: 'https://mediafusion.elfhosted.com/stremio',
-    enabled: true,
-  },
-];
+export interface Season {
+  season: number;
+  name: string;
+  overview?: string;
+  poster?: string;
+  episodes: Episode[];
+}
+
+export interface Media {
+  id: string;
+  type: MediaType;
+  title: string;
+  poster?: string;
+  backdrop?: string;
+  logo?: string;
+  overview: string;
+  year?: number;
+  runtime?: number; // minutes
+  rating?: number;
+  genres: string[];
+  cast: { id: number; name: string; character?: string; profile?: string }[];
+  director?: string;
+  certification?: string;
+  language?: string;
+  /** IMDb id, used to look up the OMDb ratings. */
+  imdbId?: string;
+  /** Filled in from OMDb; TMDB's own score stays in `rating`. */
+  imdbRating?: number;
+  imdbVotes?: number;
+  metascore?: number;
+  /** Present for series. */
+  seasons?: Season[];
+  /** Playable sources, in priority order. First playable wins on "Play". */
+  sources?: MediaSource[];
+  trailerKey?: string;
+}
+
+export interface MediaSource {
+  url: string;
+  label: string;
+  quality?: string;
+  /**
+   * `free`  — a real video file; handed to <video src> after a health check.
+   * `embed` — a page to put in an <iframe> (a YouTube trailer). Never probed,
+   *           and never passed to <video>, which would reject the page URL.
+   */
+  kind: 'free' | 'embed';
+}
+
+/* ------------------------------------------------------------------ */
+/*  Library / progress records                                         */
+/* ------------------------------------------------------------------ */
+
+export interface ProgressRecord {
+  mediaId: string;
+  type: MediaType;
+  title: string;
+  poster?: string;
+  backdrop?: string;
+  /** seconds watched */
+  time: number;
+  /** seconds total */
+  duration: number;
+  season?: number;
+  episode?: number;
+  episodeTitle?: string;
+  updatedAt: number;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Settings                                                           */
+/* ------------------------------------------------------------------ */
+
+export interface Settings {
+  theme: 'dark' | 'light' | 'system';
+  language: string;
+  autoplayNextEpisode: boolean;
+  rememberPosition: boolean;
+  skipIntro: boolean;
+  showPlayerControls: boolean;
+  defaultQuality: 'auto' | '1080p' | '720p' | '480p';
+  defaultSubtitleLang: string;
+  newContentNotifications: boolean;
+  continueWatchingReminders: boolean;
+}
+
+interface AppState {
+  progress: Record<string, ProgressRecord>;
+  watchlist: string[];
+  favorites: string[];
+  history: string[];
+  settings: Settings;
+
+  setProgress: (record: ProgressRecord) => void;
+  clearProgress: (mediaId: string) => void;
+  toggleWatchlist: (mediaId: string) => 'added' | 'removed';
+  toggleFavorite: (mediaId: string) => 'added' | 'removed';
+  removeFromWatchlist: (mediaId: string) => void;
+  removeFavorite: (mediaId: string) => void;
+  clearHistory: () => void;
+  markWatched: (mediaId: string, type: MediaType, title: string) => void;
+  updateSettings: (patch: Partial<Settings>) => void;
+  resetAll: () => void;
+}
+
+const defaultSettings: Settings = {
+  theme: 'dark',
+  language: 'en',
+  autoplayNextEpisode: true,
+  rememberPosition: true,
+  skipIntro: false,
+  showPlayerControls: true,
+  defaultQuality: 'auto',
+  defaultSubtitleLang: 'en',
+  newContentNotifications: false,
+  continueWatchingReminders: false,
+};
+
+const EMPTY = { progress: {}, watchlist: [], favorites: [], history: [], settings: defaultSettings };
+
+/** Key used to look a record up regardless of season/episode. */
+export const mediaKey = (mediaId: string) => mediaId;
 
 export const useAppStore = create<AppState>()(
   persist(
-    (set, _get) => ({
-      theme: 'dark',
-      language: 'en',
-      installedAddons: defaultAddons,
-      library: [],
-      continueWatching: [],
-      favorites: [],
-      searchHistory: [],
+    (set, get) => ({
+      ...EMPTY,
 
-      setTheme: (theme) => {
-        set({ theme });
-        const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        document.documentElement.classList.toggle('dark', isDark);
-      },
-
-      setLanguage: (language) => set({ language }),
-
-      addAddon: (addon) =>
-        set((state) => ({
-          installedAddons: [...state.installedAddons.filter((a) => a.transportUrl !== addon.transportUrl), addon],
+      setProgress: (record) =>
+        set((s) => ({
+          progress: {
+            ...s.progress,
+            [mediaKey(record.mediaId)]: { ...record, updatedAt: Date.now() },
+          },
         })),
 
-      removeAddon: (transportUrl) =>
-        set((state) => ({
-          installedAddons: state.installedAddons.filter((a) => a.transportUrl !== transportUrl),
-        })),
-
-      toggleAddon: (transportUrl) =>
-        set((state) => ({
-          installedAddons: state.installedAddons.map((a) =>
-            a.transportUrl === transportUrl ? { ...a, enabled: !a.enabled } : a
-          ),
-        })),
-
-      setAddonConfig: (transportUrl, config) =>
-        set((state) => ({
-          installedAddons: state.installedAddons.map((a) =>
-            a.transportUrl === transportUrl ? { ...a, config } : a
-          ),
-        })),
-
-      toggleFavorite: (id) =>
-        set((state) => ({
-          favorites: state.favorites.includes(id)
-            ? state.favorites.filter((f) => f !== id)
-            : [...state.favorites, id],
-        })),
-
-      addToLibrary: (item) =>
-        set((state) => ({
-          library: [...state.library.filter((i) => !(i.type === item.type && i.id === item.id)), item],
-        })),
-
-      removeFromLibrary: (type, id) =>
-        set((state) => ({
-          library: state.library.filter((i) => !(i.type === type && i.id === id)),
-          continueWatching: state.continueWatching.filter((i) => !(i.type === type && i.id === id)),
-        })),
-
-      updateProgress: (type, id, progress, duration, season, episode) =>
-        set((state) => {
-          const existing = state.library.find((i) => i.type === type && i.id === id);
-          const title = existing?.title || id;
-          const newItem: LibraryItem = { ...existing, type, id, title, progress, duration, season, episode, lastWatched: Date.now() };
-          const library = [...state.library.filter((i) => !(i.type === type && i.id === id)), newItem];
-          const continueWatching = library
-            .filter((i) => i.progress > 0 && i.progress < i.duration * 0.9)
-            .sort((a, b) => b.lastWatched - a.lastWatched)
-            .slice(0, 20);
-          return { library, continueWatching };
+      clearProgress: (mediaId) =>
+        set((s) => {
+          const next = { ...s.progress };
+          delete next[mediaKey(mediaId)];
+          return { progress: next };
         }),
 
-      addSearchHistory: (query) =>
-        set((state) => ({
-          searchHistory: [query, ...state.searchHistory.filter((q) => q !== query)].slice(0, 20),
+      toggleWatchlist: (mediaId) => {
+        const has = get().watchlist.includes(mediaId);
+        set((s) => ({
+          watchlist: has
+            ? s.watchlist.filter((id) => id !== mediaId)
+            : [...s.watchlist, mediaId],
+        }));
+        return has ? 'removed' : 'added';
+      },
+
+      toggleFavorite: (mediaId) => {
+        const has = get().favorites.includes(mediaId);
+        set((s) => ({
+          favorites: has ? s.favorites.filter((id) => id !== mediaId) : [...s.favorites, mediaId],
+        }));
+        return has ? 'removed' : 'added';
+      },
+
+      removeFromWatchlist: (mediaId) =>
+        set((s) => ({ watchlist: s.watchlist.filter((id) => id !== mediaId) })),
+
+      removeFavorite: (mediaId) =>
+        set((s) => ({ favorites: s.favorites.filter((id) => id !== mediaId) })),
+
+      clearHistory: () => set({ history: [] }),
+
+      markWatched: (mediaId, type, title) =>
+        set((s) => ({
+          history: [mediaId, ...s.history.filter((id) => id !== mediaId)].slice(0, 200),
+          progress: {
+            ...s.progress,
+            [mediaKey(mediaId)]: {
+              mediaId,
+              type,
+              title,
+              time: 1,
+              duration: 1,
+              updatedAt: Date.now(),
+            },
+          },
         })),
 
-      clearSearchHistory: () => set({ searchHistory: [] }),
+      updateSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
+
+      resetAll: () => set({ ...EMPTY, settings: { ...defaultSettings } }),
     }),
     {
-      name: 'kinora-storage',
-      version: 3,
-      partialize: (state) => ({
-        theme: state.theme,
-        language: state.language,
-        installedAddons: state.installedAddons,
-        library: state.library,
-        favorites: state.favorites,
-        searchHistory: state.searchHistory,
+      name: 'kinora-library',
+      version: 1,
+      partialize: (s) => ({
+        progress: s.progress,
+        watchlist: s.watchlist,
+        favorites: s.favorites,
+        history: s.history,
+        settings: s.settings,
       }),
-      // Installs the app's own default add-ons for installs created before they
-      // shipped, and repairs their transport URLs if they changed in a release.
-      // Anything the user added or disabled is left alone.
-      migrate: (persisted) => {
-        const state = (persisted ?? {}) as Partial<AppState>;
-        const byId = new Map((state.installedAddons ?? []).map((a) => [a.manifest.id, a]));
-        for (const addon of defaultAddons) {
-          const existing = byId.get(addon.manifest.id);
-          if (!existing) {
-            byId.set(addon.manifest.id, addon);
-          } else if (existing.transportUrl !== addon.transportUrl) {
-            byId.set(addon.manifest.id, { ...existing, transportUrl: addon.transportUrl });
-          }
-        }
-        return {
-          theme: state.theme ?? 'dark',
-          language: state.language ?? 'en',
-          installedAddons: [...byId.values()],
-          library: state.library ?? [],
-          favorites: state.favorites ?? [],
-          searchHistory: state.searchHistory ?? [],
-        };
-      },
     }
   )
 );
 
-if (typeof window !== 'undefined') {
-  const { theme } = useAppStore.getState();
-  document.documentElement.classList.toggle('dark', theme === 'dark');
-}
+/* ------------------------------------------------------------------ */
+/*  Selectors                                                          */
+/* ------------------------------------------------------------------ */
+
+export const useIsInWatchlist = (id: string) =>
+  useAppStore((s) => s.watchlist.includes(id));
+export const useIsFavorite = (id: string) => useAppStore((s) => s.favorites.includes(id));
+export const useProgressFor = (id: string) => useAppStore((s) => s.progress[mediaKey(id)]);
+
+/**
+ * These two derive a *new array* from store state, so they must be compared
+ * shallowly. Without it every snapshot is a fresh reference, `useSyncExternalStore`
+ * sees the value change on every read, and React spins forever
+ * ("Maximum update depth exceeded", error #185).
+ */
+export const useContinueWatching = () =>
+  useAppStore(
+    useShallow((s) =>
+      Object.values(s.progress)
+        .filter((p) => p.duration > 0 && p.time > 0 && p.time / p.duration < 0.95)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+    )
+  );
+
+export const useHistory = () => useAppStore(useShallow((s) => [...s.history].reverse()));

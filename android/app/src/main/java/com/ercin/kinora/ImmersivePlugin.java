@@ -1,5 +1,6 @@
 package com.ercin.kinora;
 
+import android.content.pm.ActivityInfo;
 import android.view.View;
 import android.view.Window;
 import androidx.core.view.WindowCompat;
@@ -55,6 +56,25 @@ public class ImmersivePlugin extends Plugin {
             if (decor.getSystemUiVisibility() == 0) {
                 controller.hide(WindowInsetsCompat.Type.systemBars());
             }
+            call.resolve(new JSObject());
+        });
+    }
+
+    /**
+     * Force landscape while a video plays, and release the lock afterwards.
+     *
+     * A portrait video player wastes most of a phone screen, and letting the
+     * user rotate out of landscape mid-playback causes a visible re-layout.
+     * "auto" restores whatever the device's own sensor would have chosen.
+     */
+    @PluginMethod
+    public void setLandscape(PluginCall call) {
+        boolean locked = Boolean.TRUE.equals(call.getBoolean("locked", false));
+        getActivity().runOnUiThread(() -> {
+            getActivity().setRequestedOrientation(
+                    locked
+                            ? ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                            : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
             call.resolve(new JSObject());
         });
     }

@@ -1,150 +1,227 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { search } from '../services/catalog';
+import { PosterCard } from '../components/MediaCard';
+import { EmptyState, SkeletonCard } from '../components/ui';
 import { useDebounce } from '../hooks/useDebounce';
-import { useSearch } from '../hooks/useTMDB';
-import { useTranslation } from '../hooks/useTranslation';
-import { MetaCard, EmptyState, type RailItem } from '../components';
-import { Input } from '../components/ui/basic';
-import { useSearchHistory } from '../hooks/useStremio';
 import { cn } from '../utils/cn';
 
+type Tab = 'all' | 'movies' | 'series' | 'people';
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'movies', label: 'Movies' },
+  { key: 'series', label: 'Series' },
+  { key: 'people', label: 'People' },
+];
+
 export function SearchPage() {
-  const { t } = useTranslation();
-  const { searchHistory, addSearchHistory, clearSearchHistory } = useSearchHistory();
   const [params, setParams] = useSearchParams();
+  const query = params.get('q') ?? '';
+  const [draft, setDraft] = useState(query);
+  const [tab, setTab] = useState<Tab>('all');
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const [query, setQuery] = useState(params.get('q') ?? '');
-  const debouncedQuery = useDebounce(query, 350);
+  const debounced = useDebounce(draft, 350);
 
-  const { data: results, isLoading, error } = useSearch(debouncedQuery, 'multi', 1);
-
-  // Keep the URL in sync so the top-bar search can deep-link here.
   useEffect(() => {
-    if (debouncedQuery) setParams({ q: debouncedQuery }, { replace: true });
-  }, [debouncedQuery, setParams]);
+    const merged = new URLSearchParams(params);
+    if (debounced) merged.set('q', debounced);
+    else merged.delete('q');
+    setParams(merged, { replace: true });
+    // Only the debounced value should drive the URL, not every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debounced]);
 
-  const commit = (value: string) => {
-    const v = value.trim();
-    if (v) addSearchHistory(v);
-  };
+  // Keep the field in sync when the URL changes from elsewhere (e.g. back).
+  useEffect(() => setDraft(query), [query]);
 
-  const items: RailItem[] = (results?.results ?? []).map((r) => {
-    // `multi` search returns movies and shows mixed; discriminate on media_type.
-    const withType = r as typeof r & { media_type?: 'movie' | 'tv' };
-    const isTv = withType.media_type === 'tv';
-    return {
-      id: String(r.id),
-      name: ('title' in r ? r.title : r.name) ?? '',
-      poster: r.poster_path ?? undefined,
-      releaseInfo: 'release_date' in r ? r.release_date : r.first_air_date,
-      rating: r.vote_average,
-      type: isTv ? 'series' : 'movie',
+  // ⌘K / Ctrl+K focuses the field from anywhere in the app.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
     };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  const results = useQuery({
+    queryKey: ['search', debounced],
+    queryFn: () => search(debounced),
+    enabled: debounced.trim().length > 0,
+    staleTime: 5 * 60_000,
   });
 
+  const media = results.data?.media ?? [];
+  const people = results.data?.people ?? [];
+
+  const filtered = media.filter((m) =>
+    tab === 'all' ? true : tab === 'movies' ? m.type === 'movie' : m.type === 'series'
+  );
+  const showPeople = tab === 'all' || tab === 'people';
+  const showMedia = tab !== 'people';
+
+  const searching = debounced.trim().length > 0;
+
   return (
-    <div className="px-4 py-5">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          commit(query);
-        }}
-        className="relative"
-      >
-        <Input
-          type="search"
-          placeholder={t('searchPlaceholder')}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="py-2.5 pl-10 pr-10"
-          autoFocus
-        />
-        <svg
-          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <circle cx="11" cy="11" r="8" />
-          <path d="M21 21l-4.35-4.35" />
-        </svg>
-        {query && (
-          <button
-            type="button"
-            onClick={() => setQuery('')}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text"
-            aria-label={t('close')}
+    <div className="pb-10">
+      <div className="px-4 pt-5 sm:px-6 lg:px-10">
+        <h1 className="text-2xl font-bold tracking-tight text-text sm:text-3xl">Search</h1>
+
+        <div className="relative mt-4">
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted"
+            aria-hidden
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" />
-            </svg>
-          </button>
-        )}
-      </form>
-
-      {searchHistory.length > 0 && !query && (
-        <section className="mt-6">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-medium text-text-muted">{t('history')}</h2>
-            <button onClick={clearSearchHistory} className="text-sm text-primary hover:underline">
-              {t('remove')}
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {searchHistory.map((item) => (
-              <button
-                key={item}
-                onClick={() => {
-                  setQuery(item);
-                  commit(item);
-                }}
-                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-text transition-colors hover:bg-surface-hover"
-              >
-                {item}
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {isLoading && (
-        <div className="mt-6 grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5">
-          {Array.from({ length: 15 }).map((_, i) => (
-            <div key={i} className="aspect-[2/3] animate-pulse rounded-lg bg-surface-hover" />
-          ))}
-        </div>
-      )}
-
-      {error && !isLoading && (
-        <EmptyState title={t('error')} message={error.message} />
-      )}
-
-      {!isLoading && !error && items.length > 0 && (
-        <div className="mt-6 grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5">
-          {items.map((item, i) => (
-            <MetaCard key={`${item.id}-${i}`} meta={item} size="medium" showRating={false} />
-          ))}
-        </div>
-      )}
-
-      {!isLoading && !error && query.length > 1 && items.length === 0 && (
-        <EmptyState title={t('noResults')} message={`"${query}"`} />
-      )}
-
-      {!isLoading && !error && !query && searchHistory.length === 0 && (
-        <div
-          className={cn(
-            'mt-16 flex flex-col items-center gap-3 text-center text-text-muted'
-          )}
-        >
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <circle cx="11" cy="11" r="8" />
-            <path d="M21 21l-4.35-4.35" />
+            <circle cx="11" cy="11" r="7" />
+            <path strokeLinecap="round" d="m20 20-3.5-3.5" />
           </svg>
-          <p className="text-sm">{t('searchPlaceholder')}</p>
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="Movies, series, people…"
+            aria-label="Search"
+            autoComplete="off"
+            className="input h-12 pl-11 pr-16 text-base"
+          />
+          {draft ? (
+            <button
+              onClick={() => {
+                setDraft('');
+                inputRef.current?.focus();
+              }}
+              aria-label="Clear search"
+              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-text-muted transition-colors hover:bg-elevated hover:text-text"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          ) : (
+            <kbd className="pointer-events-none absolute right-3.5 top-1/2 hidden -translate-y-1/2 rounded border border-line bg-elevated px-1.5 py-0.5 font-mono text-[10px] text-text-muted sm:block">
+              ⌘K
+            </kbd>
+          )}
         </div>
-      )}
+
+        {searching ? (
+          <div className="rail rail-bleed fade-edges mt-4">
+            <div className="flex gap-1.5">
+              {TABS.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setTab(t.key)}
+                  className={cn(
+                    'flex-none rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors',
+                    tab === t.key
+                      ? 'bg-[var(--color-accent)] text-white'
+                      : 'bg-card text-text-secondary hover:bg-elevated hover:text-text'
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="px-4 pt-6 sm:px-6 lg:px-10">
+        {!searching ? (
+          <EmptyState
+            title="What are you looking for?"
+            message="Search for a film, a series or a person."
+          />
+        ) : results.isLoading ? (
+          <>
+            {tab !== 'people' ? (
+              <div className="rail rail-bleed fade-edges">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <SkeletonCard key={i} />
+                ))}
+              </div>
+            ) : null}
+          </>
+        ) : results.isError ? (
+          <EmptyState
+            title="Search failed"
+            message="Check your connection and try again."
+            actionLabel="Retry"
+            onAction={() => results.refetch()}
+          />
+        ) : media.length === 0 && people.length === 0 ? (
+          <EmptyState
+            title={`No results for "${debounced}"`}
+            message="Try a different spelling or a shorter query."
+          />
+        ) : (
+          <div className="space-y-8">
+            {showMedia && filtered.length > 0 ? (
+              <section>
+                <div className="rail rail-bleed fade-edges">
+                  {filtered.map((m) => (
+                    <PosterCard key={`${m.type}-${m.id}`} media={m} />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {showPeople && people.length > 0 ? (
+              <section>
+                <h2 className="mb-3 text-base font-semibold text-text sm:text-lg">People</h2>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+                  {people.map((p) => (
+                    <div key={p.id} className="card card-hover p-3">
+                      <div className="flex items-center gap-3">
+                        {p.profile ? (
+                          <img
+                            src={p.profile}
+                            alt=""
+                            loading="lazy"
+                            className="h-12 w-12 flex-none rounded-full object-cover"
+                          />
+                        ) : (
+                          <span className="flex h-12 w-12 flex-none items-center justify-center rounded-full bg-elevated text-lg font-bold text-text-muted">
+                            {p.name.charAt(0)}
+                          </span>
+                        )}
+                        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-text">
+                          {p.name}
+                        </p>
+                      </div>
+                      {p.knownFor.length > 0 ? (
+                        <p className="mt-2 truncate text-[11px] text-text-muted">
+                          {p.knownFor.map((k) => k.title).join(', ')}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {showMedia && tab !== 'all' && filtered.length === 0 ? (
+              <EmptyState
+                title="No matches in this category"
+                message="Try the All tab."
+                actionLabel="Show all"
+                onAction={() => setTab('all')}
+              />
+            ) : null}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

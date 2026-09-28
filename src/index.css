@@ -1,22 +1,35 @@
 @import "tailwindcss";
 
-/*
-  Theme tokens.
-  :root is the LIGHT palette; `.dark` on <html> swaps in the dark one.
-  The store toggles that class, so the explicit and 'system' themes both work.
-*/
+/* ------------------------------------------------------------------
+   Design tokens
+   ------------------------------------------------------------------ */
 @theme {
-  --color-primary: hsl(272, 62%, 48%);
-  --color-primary-hover: hsl(272, 66%, 40%);
-  --color-background: hsl(240, 20%, 99%);
-  --color-surface: hsl(240, 16%, 96%);
-  --color-surface-hover: hsl(240, 14%, 92%);
-  --color-text: hsl(240, 18%, 12%);
-  --color-text-muted: hsl(240, 8%, 42%);
-  --color-border: hsl(240, 12%, 86%);
-  --color-error: hsl(0, 72%, 48%);
-  --color-success: hsl(147, 55%, 34%);
+  /* Surfaces */
+  --color-background: #08090b;
+  --color-surface: #111318;
+  --color-card: #17191f;
+  --color-elevated: #1d2027;
+
+  /* Text */
+  --color-text: #ffffff;
+  --color-text-secondary: #a7abb5;
+  --color-text-muted: #6f7480;
+
+  /* Lines + accent */
+  --color-line: rgba(255, 255, 255, 0.08);
+  --color-accent: #e50914;
+  --color-accent-hover: #f6121d;
+
+  /* Status */
+  --color-success: #2eb85c;
+  --color-warning: #d6a419;
+  --color-danger: #e5484d;
+
+  /* Netflix-style brand red, kept separate from the interactive accent. */
   --color-netflix: hsl(0, 78%, 50%);
+
+  --radius-card: 0.75rem;
+  --radius-control: 0.625rem;
 
   --safe-area-inset-top: env(safe-area-inset-top);
   --safe-area-inset-bottom: env(safe-area-inset-bottom);
@@ -25,42 +38,61 @@
 }
 
 .dark {
-  --color-primary: hsla(272, 62%, 55%, 1);
-  --color-primary-hover: hsla(272, 70%, 66%, 1);
-  --color-background: hsla(240, 12%, 7%, 1);
-  --color-surface: hsla(240, 10%, 11%, 1);
-  --color-surface-hover: hsla(240, 10%, 16%, 1);
-  --color-text: hsla(0, 0%, 96%, 1);
-  --color-text-muted: hsla(240, 5%, 62%, 1);
-  --color-border: hsla(240, 8%, 20%, 1);
-  --color-error: hsla(0, 72%, 58%, 1);
-  --color-success: hsla(147, 55%, 45%, 1);
+  --color-background: #08090b;
+  --color-surface: #111318;
+  --color-card: #17191f;
+  --color-elevated: #1d2027;
+}
+
+/* Light mode: keep the same ramp, inverted for legibility. */
+.light {
+  --color-background: #f7f7f9;
+  --color-surface: #ffffff;
+  --color-card: #ffffff;
+  --color-elevated: #eceef2;
+  --color-text: #0d0f14;
+  --color-text-secondary: #4a4f5a;
+  --color-text-muted: #767c88;
+  --color-line: rgba(0, 0, 0, 0.1);
 }
 
 @layer base {
   * {
-    border-color: var(--color-border);
+    border-color: var(--color-line);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
   }
 
   body {
     background-color: var(--color-background);
     color: var(--color-text);
+    font-family: Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     overscroll-behavior-y: none;
   }
 
-  /* Give iOS momentum scrolling and Android the same sticky-feel. */
   #root {
-    min-height: 100vh;
     min-height: 100dvh;
     width: 100%;
   }
 
-  /* Keep images from ever blowing out a flex/grid row. */
   img {
     max-width: 100%;
+  }
+
+  /* Visible focus everywhere, per the accessibility requirements. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  button {
+    font: inherit;
   }
 }
 
@@ -69,7 +101,7 @@
   .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
   .safe-left { padding-left: env(safe-area-inset-left); }
   .safe-right { padding-right: env(safe-area-inset-right); }
-  .safe-area { 
+  .safe-area {
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
     padding-left: env(safe-area-inset-left);
@@ -84,44 +116,34 @@
 
   .touch-action { touch-action: manipulation; }
   .text-balance { text-wrap: balance; }
+  .no-select { -webkit-user-select: none; user-select: none; }
+
+  /* Thin themed scrollbar for panels that keep theirs. */
+  .scrollbar-slim { scrollbar-width: thin; }
 }
 
-/* Component styles as regular CSS */
+/* ------------------------------------------------------------------
+   Primitives
+
+   These live in `@layer components` on purpose. Unlayered rules beat every
+   Tailwind utility regardless of specificity, so an unlayered
+   `padding: 0.625rem 0.875rem` on `.input` silently overrode every
+   `pl-*` / `py-0` a caller passed. Inside the components layer, utilities
+   (which Tailwind emits in the utilities layer) win as expected.
+   ------------------------------------------------------------------ */
+@layer components {
 .card {
-  background-color: var(--color-surface);
-  border-radius: 1rem;
+  background-color: var(--color-card);
+  border-radius: var(--radius-card);
   overflow: hidden;
-  transition: all 200ms;
+  transition: transform 200ms cubic-bezier(0.2, 0, 0, 1), box-shadow 200ms ease;
 }
-.card:hover {
-  background-color: var(--color-surface-hover);
-  transform: scale(1.02);
+.card-hover:hover {
+  transform: scale(1.03);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
-.card:active {
-  transform: scale(0.98);
-}
-
-.rail {
-  display: flex;
-  gap: 0.5rem;
-  overflow-x: auto;
-  padding-bottom: 0.375rem;
-  scroll-snap-type: x proximity;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.rail::-webkit-scrollbar { display: none; }
-.rail-item {
-  scroll-snap-align: start;
-  flex-shrink: 0;
-}
-
-/* Lets a carousel run past the page padding so the next poster peeks in. */
-.rail-bleed {
-  margin-left: -1rem;
-  margin-right: -1rem;
-  padding-left: 1rem;
-  padding-right: 1rem;
+.card-hover:active {
+  transform: scale(0.99);
 }
 
 .btn {
@@ -129,90 +151,140 @@
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  border-radius: 0.5rem;
-  font-weight: 500;
-  transition: color 0.2s;
+  border-radius: var(--radius-control);
+  font-weight: 600;
+  transition: background-color 160ms ease, color 160ms ease, transform 160ms ease,
+    border-color 160ms ease;
   touch-action: manipulation;
+  white-space: nowrap;
 }
-.btn-primary {
-  background-color: var(--color-primary);
-  color: white;
-}
-.btn-primary:hover {
-  background-color: var(--color-primary-hover);
-}
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+.btn-primary { background-color: var(--color-accent); color: #fff; }
+.btn-primary:hover:not(:disabled) { background-color: var(--color-accent-hover); }
 .btn-secondary {
-  background-color: var(--color-surface);
+  background-color: var(--color-elevated);
   color: var(--color-text);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-line);
 }
-.btn-secondary:hover {
-  background-color: var(--color-surface-hover);
-}
-.btn-ghost {
-  color: var(--color-text-muted);
-}
-.btn-ghost:hover {
-  color: var(--color-text);
-  background-color: var(--color-surface);
-}
+.btn-secondary:hover:not(:disabled) { background-color: var(--color-surface); }
+.btn-ghost { background-color: transparent; color: var(--color-text-secondary); }
+.btn-ghost:hover:not(:disabled) { background-color: var(--color-elevated); color: var(--color-text); }
 
 .input {
   width: 100%;
-  padding: 0.5rem 1rem;
-  border-radius: 0.5rem;
   background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
   color: var(--color-text);
+  padding: 0.625rem 0.875rem;
 }
-.input::placeholder {
-  color: var(--color-text-muted);
-}
+.input::placeholder { color: var(--color-text-muted); }
 .input:focus {
   outline: none;
-  box-shadow: 0 0 0 2px var(--color-primary);
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 999px;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.badge-default { background: var(--color-elevated); color: var(--color-text-secondary); }
+.badge-accent { background: var(--color-accent); color: #fff; }
+.badge-success { background: color-mix(in srgb, var(--color-success) 22%, transparent); color: var(--color-success); }
+.badge-warning { background: color-mix(in srgb, var(--color-warning) 22%, transparent); color: var(--color-warning); }
+.badge-danger { background: color-mix(in srgb, var(--color-danger) 22%, transparent); color: var(--color-danger); }
+
+/* Horizontal content row */
+.rail {
+  display: flex;
+  gap: 0.875rem;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding-bottom: 0.25rem;
+}
+.rail::-webkit-scrollbar { display: none; }
+.rail-item { scroll-snap-align: start; flex-shrink: 0; }
+.rail-bleed {
+  margin-left: -1rem;
+  margin-right: -1rem;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+/* Edge-fade so rows feel continuous rather than clipped. */
+.fade-edges {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 1.5rem, #000 calc(100% - 1.5rem), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 1.5rem, #000 calc(100% - 1.5rem), transparent);
+}
+
+/* ------------------------------------------------------------------
+   Animation
+   ------------------------------------------------------------------ */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 
 .skeleton {
-  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  background-color: var(--color-surface-hover);
-  border-radius: 0.5rem;
+  background: linear-gradient(
+    90deg,
+    var(--color-card) 0%,
+    var(--color-elevated) 40%,
+    var(--color-card) 80%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+  border-radius: var(--radius-card);
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-/* Slow cinematic push-in on the active hero slide. */
 @keyframes kenburns {
   from { transform: scale(1) translate3d(0, 0, 0); }
-  to   { transform: scale(1.12) translate3d(0, -1.5%, 0); }
+  to   { transform: scale(1.1) translate3d(0, -1.5%, 0); }
 }
+.kenburns { animation: kenburns 10s ease-out forwards; will-change: transform; }
 
-.kenburns {
-  animation: kenburns 9s ease-out forwards;
-  will-change: transform;
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
-
-@media (prefers-reduced-motion: reduce) {
-  .kenburns { animation: none; }
-}
-
-/* Keeps hero text legible over bright fanart without a heavy dark scrim. */
-.text-hero-shadow {
-  text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.95),
-    0 2px 10px rgba(0, 0, 0, 0.75),
-    0 6px 28px rgba(0, 0, 0, 0.55);
-}
-
-.text-hero-shadow-sm {
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85), 0 2px 10px rgba(0, 0, 0, 0.5);
-}
+.fade-in { animation: fadeIn 500ms ease both; }
 
 @keyframes fadeUp {
-  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  from { opacity: 0; transform: translate3d(0, 16px, 0); }
   to   { opacity: 1; transform: translate3d(0, 0, 0); }
 }
+.fade-up { animation: fadeUp 500ms cubic-bezier(0.2, 0, 0, 1) both; }
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.96) translate3d(0, 8px, 0); }
+  to   { opacity: 1; transform: scale(1) translate3d(0, 0, 0); }
+}
+.pop-in { animation: popIn 200ms cubic-bezier(0.2, 0, 0, 1) both; }
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translate3d(1rem, 0, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+.toast-in { animation: toastIn 240ms cubic-bezier(0.2, 0, 0, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .kenburns { animation: none; }
+}
+} /* end @layer components */

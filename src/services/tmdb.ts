@@ -1,6 +1,24 @@
-const TMDB_KEY = '2a5568baeef016cd5241440fab2767de';
+const TMDB_KEY = import.meta.env.VITE_TMDB_API_KEY ?? '';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const IMG_BASE = 'https://image.tmdb.org/t/p';
+
+/*
+ * About hiding the key.
+ *
+ * It lives in `.env`, which is gitignored, and is inlined into the bundle at
+ * build time by Vite — so it is not in the repository, but it *is* inside the
+ * APK and anyone who unzips it can read it. That is unavoidable for a key the
+ * client has to send itself, and it is the same trade every mobile API client
+ * makes.
+ *
+ * What this does protect: the key is out of git history, out of diffs and out
+ * of pull requests. What it does not: a determined reader of the APK. If the
+ * key ever leaks, rotate it at the provider — the app reads it at build time,
+ * so a rebuild picks up the replacement.
+ *
+ * (The v4 JWT is not used: those tokens carry an `nbf` of a few months' life
+ * and this one expired in May 2026, which makes every v4 call a 404.)
+ */
 
 export interface TMDBMovie {
   id: number;
@@ -58,6 +76,7 @@ export interface TMDBDetails {
   number_of_episodes?: number;
   seasons?: TMDBSeason[];
   production_companies: { id: number; name: string; logo_path: string | null }[];
+  certification?: string;
   credits?: TMDBCredits;
   videos?: TMDBVideos;
   external_ids?: { imdb_id: string | null };
@@ -145,8 +164,11 @@ async function tmdbFetch<T>(endpoint: string, params: Record<string, string | nu
 }
 
 export const tmdb = {
-  async getTrending(type: 'movie' | 'tv', timeWindow: 'day' | 'week' = 'week') {
-    return tmdbFetch<TMDBResponse<TMDBMovie | TMDBTVShow>>(`/trending/${type}/${timeWindow}`);
+  /** v3 API key. Non-expiring, unlike the v4 JWT. */
+  apiKey: TMDB_KEY,
+
+  async getTrending(type: 'movie' | 'tv', timeWindow: 'day' | 'week' = 'week', page = 1) {
+    return tmdbFetch<TMDBResponse<TMDBMovie | TMDBTVShow>>(`/trending/${type}/${timeWindow}`, { page });
   },
 
   async getPopular(type: 'movie' | 'tv', page = 1) {

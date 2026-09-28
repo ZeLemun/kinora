@@ -1,514 +1,544 @@
-import { useState, useEffect, useRef } from 'react';
-import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { useTranslation } from '../hooks/useTranslation';
-import { useMeta, useStreams, useSubtitles, useLibrary, useFavorites } from '../hooks/useStremio';
-import { useDetails, tmdb } from '../hooks/useTMDB';
-import { isProbablyPlayable } from '../services/addon-client';
+import { useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { loadMovie, loadSeries, similar } from '../services/catalog';
+import { mergeSources, trailerSource, useArchiveSources } from '../services/sources';
+import { useOmdbRatings } from '../services/omdb';
+import { useSourcePicker } from '../hooks/useSourcePicker';
+import { MediaRow } from '../components/MediaRow';
 import { TrailerModal } from '../components/TrailerModal';
-import { formatRuntime, formatYear, formatRating, cn } from '../utils/cn';
-import { Button, Badge } from '../components/ui/basic';
-import { ErrorFallback, LoadingState } from '../components/ErrorFallback';
-import type { Stream } from '../addon-types';
-import { PlayerModal } from '../components/PlayerModal';
+import { EmptyState, SkeletonDetail, useToast } from '../components/ui';
+import {
+  useAppStore,
+  useIsFavorite,
+  useIsInWatchlist,
+  useProgressFor,
+  type Episode,
+  type MediaType,
+} from '../store/app-store';
+import { cn } from '../utils/cn';
 
-/** Public test clip, used only to prove the player works. Never real content. */
-const DEMO_STREAM: Stream = {
-  url: 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_2MB.mp4',
-  title: 'Player demo — test clip, not this title',
-  quality: '720p',
-};
+const fmtRuntime = (min?: number) => (min ? `${Math.floor(min / 60)}h ${min % 60}m` : '');
 
-export function DetailPage() {
-  const { type, id } = useParams<{ type: string; id: string }>();
-  const location = useLocation();
+const LONG_DATE = new Intl.DateTimeFormat('en', { year: 'numeric', month: 'short', day: 'numeric' });
+
+/**
+ * Detail page for both a film and a series. Series get a season selector and an
+ * episode browser; films get a source list and a trailer.
+ */
+export function DetailPage({ type }: { type: MediaType }) {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { t } = useTranslation();
-  const { library, addToLibrary, removeFromLibrary, updateProgress } = useLibrary();
-  const { favorites, toggleFavorite } = useFavorites();
+  const { toast } = useToast();
 
-  const isMovie = type === 'movie';
-  const mediaType = isMovie ? 'movie' : 'series';
-  const tmdbType = isMovie ? 'movie' : 'tv';
+  const mediaId = Number(id);
+  const valid = Number.isFinite(mediaId) && mediaId > 0;
 
-  // Routes may carry either a TMDB numeric id (from TMDB rails) or a Stremio/IMDb id.
-  const rawId = id ?? '';
-  const isImdbId = /^tt\d+/i.test(rawId);
-  const tmdbId = isImdbId ? 0 : Number(rawId) || 0;
+  const detail = useQuery({
+    queryKey: ['detail', type, mediaId],
+    queryFn: () => (type === 'movie' ? loadMovie(mediaId) : loadSeries(mediaId)),
+    enabled: valid,
+    staleTime: 30 * 60_000,
+  });
 
-  const { data: tmdbData, isLoading: tmdbLoading, error: tmdbError } = useDetails(tmdbType, tmdbId);
+  const media = detail.data;
 
-  // Cinemeta (and every other addon) keys on IMDb ids, so we must resolve them first.
-  const imdbId = isImdbId ? rawId : (tmdbData?.external_ids?.imdb_id ?? '');
+  // IMDb score, metascore and certificate. Best-effort: a failure here leaves
+  // the TMDB values alone rather than holding up the page.
+  const omdb = useOmdbRatings(media?.imdbId);
+  const imdb = omdb.data;
+  const certification = imdb?.rated ?? media?.certification;
+  /* Sources. The archive lookup runs in the background; the trailer is
+     derived from the detail response and is therefore available immediately. */
+  const archive = useArchiveSources(media);
+  const list = useMemo(
+    () => mergeSources(archive.data ?? [], trailerSource(media)),
+    [archive.data, media]
+  );
+  const picker = useSourcePicker(list, true);
+  const { probes } = picker;
 
-  const { data: metaData } = useMeta(mediaType, imdbId);
+  const [season, setSeason] = useState<number | null>(null);
+  const [trailerOpen, setTrailerOpen] = useState(false);
 
-  const [season, setSeason] = useState(1);
-  const [episode, setEpisode] = useState(1);
-  const [player, setPlayer] = useState<Stream | null>(null);
-  const [trailer, setTrailer] = useState<number | null>(null);
+  const isWatchlisted = useIsInWatchlist(String(mediaId));
+  const isFavorite = useIsFavorite(String(mediaId));
+  const progress = useProgressFor(String(mediaId));
+  const toggleWatchlist = useAppStore((s) => s.toggleWatchlist);
+  const toggleFavorite = useAppStore((s) => s.toggleFavorite);
 
-  const streamId = !isMovie && imdbId ? `${imdbId}:${season}:${episode}` : imdbId;
-  const { data: streamsData, isLoading: streamsLoading } = useStreams(mediaType, streamId);
-  const { data: subtitlesData } = useSubtitles(mediaType, streamId);
+  const related = useQuery({
+    queryKey: ['similar', type, mediaId],
+    queryFn: () => similar(media!),
+    enabled: !!media,
+    staleTime: 30 * 60_000,
+  });
 
-  const meta = metaData?.meta;
-  const details = tmdbData;
-  const streams = streamsData?.streams ?? [];
-  const subtitles = subtitlesData?.subtitles ?? [];
+  const seasons = media?.seasons ?? [];
+  const activeSeason = season ?? seasons[0]?.season ?? 1;
+  const episodes = useMemo(
+    () => seasons.find((s) => s.season === activeSeason)?.episodes ?? [],
+    [seasons, activeSeason]
+  );
 
-  // Torrent/P2P sources, magnets and add-on error placeholders cannot play in a
-  // WebView. When that is all we have, append a labelled test clip so the player
-  // itself can still be verified — but never auto-select it.
-  const realPlayable = streams.filter(isProbablyPlayable);
-  const sourceList = realPlayable.length > 0 ? streams : [...streams, DEMO_STREAM];
-  /** Only real sources drive Watch Now; the demo must be tapped explicitly. */
-  const firstPlayable = realPlayable[0];
-  const demoTitle =
-    streams.length > 0
-      ? `${DEMO_STREAM.title} (${streams.length} unplayable source${streams.length === 1 ? '' : 's'} found above)`
-      : DEMO_STREAM.title;
+  if (!valid) {
+    return <EmptyState title="Not found" message="That title doesn't exist." />;
+  }
 
-  const title = meta?.name ?? details?.title ?? details?.name ?? rawId;
-  const overview = meta?.description ?? details?.overview ?? t('noDescription');
-  const poster = tmdb.resolveImage(meta?.poster ?? details?.poster_path ?? null, 'w500');
-  // Prefer TMDB artwork (known to load); fall back to metahub by IMDb id.
-  const backdrop =
-    tmdb.resolveImage(details?.backdrop_path ?? null, 'w1280') ??
-    (meta?.id ? `https://images.metahub.space/background/medium/${meta.id}/bg.jpg` : null);
-  const releaseInfo = meta?.releaseInfo ?? details?.release_date ?? details?.first_air_date;
-  const rating = meta?.rating ?? details?.vote_average;
-  const genres = meta?.genres ?? details?.genres?.map((g) => g.name) ?? [];
-  const runtime = details?.runtime ?? details?.episode_run_time?.[0];
-  const cast = details?.credits?.cast?.slice(0, 12) ?? [];
-  const videos =
-    details?.videos?.results?.filter(
-      (v) => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser')
-    ) ?? [];
-  const seasons = (details?.seasons ?? []).filter((s) => s.season_number > 0);
+  if (detail.isLoading) return <SkeletonDetail />;
 
-  const isInLibrary = library.some((item) => item.id === rawId);
-  const isFavorite = favorites.includes(rawId);
-  const autoplay = location.pathname.startsWith('/watch');
-  const autoTried = useRef(false);
-  const pendingNext = useRef<number | null>(null);
-
-  // On /watch routes open the first available stream as soon as it arrives.
-  useEffect(() => {
-    if (!autoplay || autoTried.current) return;
-    if (sourceList.length > 0) {
-      autoTried.current = true;
-      setPlayer(firstPlayable);
-    }
-  }, [autoplay, firstPlayable]);
-
-  // Once the next episode's streams arrive, open them without another tap.
-  useEffect(() => {
-    if (pendingNext.current === null) return;
-    if (episode !== pendingNext.current) return;
-    if (sourceList.length > 0) {
-      setPlayer(firstPlayable);
-      pendingNext.current = null;
-    }
-  }, [episode, firstPlayable]);
-
-  // All hooks must run before the early returns below, or React sees a
-  // different hook count between the loading and loaded renders (#310).
-  if (!isImdbId && tmdbLoading) return <LoadingState message={t('loading')} />;
-
-  if (!isImdbId && (tmdbError || !details)) {
+  if (detail.isError || !media) {
     return (
-      <ErrorFallback
-        message={t('notFound')}
-        error={tmdbError instanceof Error ? tmdbError : undefined}
-        onRetry={() => window.location.reload()}
+      <EmptyState
+        title="Couldn't load this title"
+        message="Check your connection and try again."
+        actionLabel="Retry"
+        onAction={() => detail.refetch()}
       />
     );
   }
 
-  const handleListToggle = () => {
-    if (isInLibrary) {
-      removeFromLibrary({ type: mediaType, id: rawId });
-      return;
-    }
-    addToLibrary({
-      type: mediaType,
-      id: rawId,
-      title,
-      duration: runtime ?? 0,
-      poster: details?.poster_path ?? meta?.poster ?? undefined,
-    });
-  };
+  const resume =
+    progress && progress.time > 5 && progress.time < progress.duration - 10
+      ? `${Math.floor(progress.time / 60)}:${String(Math.floor(progress.time % 60)).padStart(2, '0')}`
+      : null;
 
-  const handleWatch = () => {
-    if (firstPlayable) setPlayer(firstPlayable);
-  };
+  /** Sources that survived a health check; drives whether Watch Now is primary. */
+  const playable = picker.ranked.filter(
+    (s) => s.kind === 'free' && probes[s.url]?.state !== 'failed'
+  );
 
-  // Advances to the next episode and immediately opens its first stream.
-  const goToNextEpisode = () => {
-    const next = episode + 1;
-    pendingNext.current = next;
-    setEpisode(next);
-    setPlayer(null);
+  const back = () => {
+    if (window.history.length > 1) navigate(-1);
+    else navigate('/');
   };
 
   return (
-    <div className="relative min-h-screen bg-background">
-      {/* Backdrop header — same pattern as the home Hero, which renders reliably. */}
-      <div className="relative h-[58vh] max-h-[480px] w-full overflow-hidden">
-        {backdrop ? (
-          <img src={backdrop} alt="" className="h-full w-full object-cover object-top" />
-        ) : poster ? (
-          <div
-            className="h-full w-full scale-110 bg-cover bg-center blur-2xl"
-            style={{ backgroundImage: `url(${poster})`, opacity: 0.5 }}
+    <div className="pb-12">
+      {/* Backdrop */}
+      <div className="relative h-[46dvh] w-full overflow-hidden bg-card sm:h-[56dvh] lg:h-[600px]">
+        {media.backdrop ? (
+          <img
+            src={media.backdrop}
+            alt=""
+            className="h-full w-full object-cover object-top"
           />
-        ) : null}
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-background/10" />
+        ) : (
+          <div className="h-full w-full bg-gradient-to-br from-elevated to-card" />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/20 to-background" />
 
-        <div className="absolute inset-x-0 bottom-0 px-4 pb-5 sm:px-6">
-          <div className="max-w-2xl">
-            <div className="mb-2 flex flex-wrap gap-1.5">
-              {genres.slice(0, 3).map((g) => (
-                <span
-                  key={g}
-                  className="rounded-full bg-white/10 px-2.5 py-0.5 text-[11px] font-medium text-white/90 backdrop-blur-sm"
-                >
-                  {g}
-                </span>
-              ))}
-            </div>
-
-            <h1 className="line-clamp-2 text-3xl font-bold leading-tight text-white drop-shadow-lg sm:text-4xl">
-              {title}
-            </h1>
-
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/85 sm:text-sm">
-              <span className="rounded bg-white/15 px-1.5 py-0.5 font-medium backdrop-blur-sm">
-                {isMovie ? t('movies') : t('series')}
-              </span>
-              {releaseInfo ? <span>{formatYear(releaseInfo)}</span> : null}
-              {runtime ? <span>{formatRuntime(runtime)}</span> : null}
-              {rating ? (
-                <span className="flex items-center gap-1 text-yellow-400">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-                  </svg>
-                  {formatRating(rating)}
-                </span>
-              ) : null}
-            </div>
-
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button onClick={handleWatch} disabled={!firstPlayable} size="md" className="gap-1.5">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-                {t('watchNow')}
-              </Button>
-              <Button variant="secondary" onClick={handleListToggle} size="md" className="gap-1.5">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill={isInLibrary ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
-                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-                </svg>
-                {isInLibrary ? t('removeFromList') : t('addToList')}
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={() => toggleFavorite(rawId)}
-                aria-label={t('favorites')}
-                className="border border-white/20 bg-white/10 px-3 text-white hover:bg-white/20"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill={isFavorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
-                  <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-                </svg>
-              </Button>
-            </div>
-          </div>
-        </div>
+        <button
+          onClick={back}
+          aria-label="Go back"
+          className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm transition-colors hover:bg-black/75 sm:left-5 sm:top-5"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
       </div>
 
-      <button
-        onClick={() => navigate(-1)}
-        className="absolute left-4 top-[calc(env(safe-area-inset-top)+0.75rem)] z-10 rounded-full bg-black/60 p-2 text-white backdrop-blur-sm"
-        aria-label="Indietro"
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-        </svg>
-      </button>
-
-      <div className="mx-auto w-full max-w-5xl px-4 pb-10">
-        {/* Poster + quick facts, in normal flow so nothing gets clipped. */}
-        <div className="-mt-12 flex gap-4">
-          {poster ? (
-            <img
-              src={poster}
-              alt={title}
-              className="aspect-[2/3] w-24 flex-none rounded-lg object-cover shadow-xl sm:w-32"
-            />
-          ) : (
-            <div className="flex aspect-[2/3] w-24 flex-none items-center justify-center rounded-lg bg-surface-hover text-2xl font-semibold text-text-muted sm:w-32">
-              {title.charAt(0)}
-            </div>
-          )}
-
-          <dl className="min-w-0 flex-1 space-y-1.5 pt-1 text-sm">
-            {meta?.director && (
-              <div>
-                <dt className="inline text-text-muted">{t('director')}: </dt>
-                <dd className="inline text-text">{meta.director}</dd>
+      {/* Title block */}
+      <div className="relative -mt-24 px-4 sm:-mt-32 sm:px-6 lg:-mt-40 lg:px-10">
+        <div className="flex gap-4 sm:gap-6">
+          <div className="w-24 flex-none sm:w-36 lg:w-44">
+            <div className="overflow-hidden rounded-xl border border-line shadow-2xl">
+              <div className="aspect-[2/3] bg-card">
+                {media.poster ? (
+                  <img src={media.poster} alt={media.title} className="h-full w-full object-cover" />
+                ) : null}
               </div>
-            )}
-            {releaseInfo && (
-              <div>
-                <dt className="inline text-text-muted">{t('year')}: </dt>
-                <dd className="inline text-text">{formatYear(releaseInfo)}</dd>
-              </div>
-            )}
-            {runtime && (
-              <div>
-                <dt className="inline text-text-muted">{t('runtime')}: </dt>
-                <dd className="inline text-text">{formatRuntime(runtime)}</dd>
-              </div>
-            )}
-          </dl>
-        </div>
-
-        <p className="mt-4 max-w-3xl text-sm leading-relaxed text-text-muted">{overview}</p>
-
-        {/* Seasons */}
-        {!isMovie && seasons.length > 0 && (
-          <section className="mt-8">
-            <h2 className="mb-3 text-lg font-semibold text-text">{t('seasons')}</h2>
-            <div className="rail gap-2 pb-2">
-              {seasons.map((s) => (
-                <button
-                  key={s.season_number}
-                  onClick={() => {
-                    setSeason(s.season_number);
-                    setEpisode(1);
-                  }}
-                  className={cn(
-                    'flex-none whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors',
-                    season === s.season_number
-                      ? 'bg-primary text-white'
-                      : 'bg-surface text-text-muted hover:bg-surface-hover'
-                  )}
-                >
-                  {s.name || `${t('seasons')} ${s.season_number}`}
-                </button>
-              ))}
             </div>
-          </section>
-        )}
-
-        {/* Episodes */}
-        {!isMovie && meta?.videos && (
-          <section className="mt-6">
-            <h2 className="mb-3 text-lg font-semibold text-text">{t('episodes')}</h2>
-            <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
-              {Array.from({ length: Math.max(1, season) === 0 ? 0 : 12 }, (_, i) => i + 1).map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setEpisode(n)}
-                  className={cn(
-                    'rounded-lg py-2 text-sm font-medium transition-colors',
-                    episode === n ? 'bg-primary text-white' : 'bg-surface text-text-muted'
-                  )}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Next episode shortcut for series */}
-        {!isMovie && (
-          <Button
-            variant="secondary"
-            onClick={goToNextEpisode}
-            className="mt-4 h-11 w-full gap-2 rounded-[10px] sm:w-auto sm:px-6"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6 4l10 8-10 8V4z" />
-            </svg>
-            {t('nextEpisode')} · S{season} E{episode + 1}
-          </Button>
-        )}
-
-        {/* Streams */}
-        <section className="mt-8">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-base font-semibold tracking-wide text-text sm:text-lg">
-              {t('sources')}
-            </h2>
-            <span className="text-[11px] text-text-muted">
-              {streamsLoading ? t('loading') : sourceList.length}
-            </span>
           </div>
 
-          {sourceList.length === 0 ? (
-            <div className="rounded-xl border border-border bg-surface p-6 text-center">
-              <p className="text-sm text-text">{t('noStreams')}</p>
-              <p className="mt-1 text-xs leading-relaxed text-text-muted">
-                {t('noStreamsHint')}
-              </p>
+          <div className="min-w-0 flex-1 pt-2 sm:pt-6">
+            <h1 className="text-hero-shadow-sm text-2xl font-bold leading-tight text-text sm:text-4xl lg:text-5xl">
+              {media.title}
+            </h1>
+
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs text-text-secondary sm:text-sm">
+              {media.rating ? (
+                <span className="flex items-center gap-1 font-semibold text-yellow-400" title="TMDB">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                  </svg>
+                  {media.rating.toFixed(1)}
+                </span>
+              ) : null}
+              {imdb?.imdbRating ? (
+                <span
+                  className="flex items-center gap-1 font-semibold text-yellow-400"
+                  title={imdb.imdbVotes ? `${imdb.imdbVotes.toLocaleString()} IMDb votes` : 'IMDb'}
+                >
+                  <span className="text-[10px] font-bold uppercase tracking-wide opacity-70">IMDb</span>
+                  {imdb.imdbRating.toFixed(1)}
+                </span>
+              ) : null}
+              {imdb?.metascore ? (
+                <span className="font-semibold text-text-secondary" title="Metacritic">
+                  <span className="text-[10px] font-bold uppercase tracking-wide opacity-60">MC</span>{' '}
+                  {imdb.metascore}
+                </span>
+              ) : null}
+              {media.year && <span>{media.year}</span>}
+              {fmtRuntime(media.runtime) && <span>{fmtRuntime(media.runtime)}</span>}
+              {certification && (
+                <span className="badge badge-default border border-line">{certification}</span>
+              )}
+              <span className="badge badge-default border border-line">
+                {media.type === 'movie' ? 'Movie' : 'Series'}
+              </span>
             </div>
-          ) : (
-            <div className="space-y-2">
-              {sourceList.map((stream, i) => {
-                const isDemo = stream.url === DEMO_STREAM.url;
+
+            {/* Genres */}
+            {media.genres.length > 0 ? (
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                {media.genres.map((g) => {
+                    const gid = GENRE_IDS[g];
+                    return gid ? (
+                      <Link
+                        key={g}
+                        to={`/discover?type=${media.type}&sort=${
+                          media.type === 'movie' ? 'popularMovies' : 'popularSeries'
+                        }&genre=${gid}`}
+                        className="rounded-full bg-card px-2.5 py-0.5 text-[11px] text-text-secondary transition-colors hover:bg-elevated hover:text-text"
+                      >
+                        {g}
+                      </Link>
+                    ) : (
+                      <span
+                        key={g}
+                        className="rounded-full bg-card px-2.5 py-0.5 text-[11px] text-text-secondary"
+                      >
+                        {g}
+                      </span>
+                    );
+                  })}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="mt-5 flex flex-wrap items-center gap-2">
+          <Link
+            to={`/player/${media.id}${type === 'series' ? `?season=${activeSeason}&episode=1` : ''}`}
+            className={cn(
+              'btn h-11 px-6 text-sm sm:text-base',
+              playable.length > 0 ? 'btn-primary' : 'btn-secondary'
+            )}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M8 5v14l11-7z" />
+            </svg>
+            {resume ? `Resume from ${resume}` : 'Watch Now'}
+          </Link>
+
+          <button
+            onClick={() => {
+              const r = toggleWatchlist(String(mediaId));
+              toast(
+                r === 'added' ? 'Added to Watchlist' : 'Removed from Watchlist',
+                r === 'added' ? 'success' : 'default'
+              );
+            }}
+            aria-pressed={isWatchlisted}
+            aria-label={isWatchlisted ? 'Remove from Watchlist' : 'Add to Watchlist'}
+            className="btn btn-secondary h-11 flex-1 gap-2 px-4 text-sm sm:flex-none"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill={isWatchlisted ? 'currentColor' : 'none'}
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden
+            >
+              <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.5L5 21V4a1 1 0 0 1 1-1z" />
+            </svg>
+            {isWatchlisted ? 'Saved' : 'Add'}
+          </button>
+
+          <button
+            onClick={() => {
+              const r = toggleFavorite(String(mediaId));
+              toast(
+                r === 'added' ? 'Added to Favorites' : 'Removed from Favorites',
+                r === 'added' ? 'success' : 'default'
+              );
+            }}
+            aria-pressed={isFavorite}
+            aria-label={isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}
+            className="btn btn-secondary h-11 w-11 flex-none px-0"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill={isFavorite ? 'currentColor' : 'none'}
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden
+            >
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+            </svg>
+          </button>
+
+          {media.trailerKey ? (
+            <button
+              onClick={() => setTrailerOpen(true)}
+              className="btn btn-secondary h-11 flex-1 gap-2 px-4 text-sm sm:flex-none"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <rect x="2" y="5" width="20" height="14" rx="2" />
+                <path d="m10 9 5 3-5 3z" fill="currentColor" stroke="none" />
+              </svg>
+              Trailer
+            </button>
+          ) : null}
+        </div>
+
+        {/* Sources */}
+        {list.length > 0 ? (
+          <div className="mt-5 rounded-xl border border-line bg-card p-3.5">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
+              Available sources
+            </h3>
+            <ul className="mt-2.5 space-y-1.5">
+              {picker.ranked.map((s) => {
+                const dead = s.kind === 'free' && probes[s.url]?.state === 'failed';
                 return (
-                  <button
-                    key={`${stream.url}-${i}`}
-                    onClick={() => setPlayer(isDemo ? { ...stream, title: demoTitle } : stream)}
-                    className={cn(
-                      'flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left transition-colors hover:bg-surface-hover',
-                      isDemo
-                        ? 'border-dashed border-border bg-surface/50'
-                        : 'border-border bg-surface'
-                    )}
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-text">
-                        {isDemo
-                          ? demoTitle
-                          : stream.title || stream.behaviorHints?.bingeGroup || `Source ${i + 1}`}
-                      </p>
-                      {stream.behaviorHints?.filename && (
-                        <p className="truncate text-xs text-text-muted">
-                          {stream.behaviorHints.filename}
-                        </p>
+                  <li key={s.url}>
+                    <Link
+                      to={`/player/${media.id}?src=${encodeURIComponent(s.url)}${
+                        type === 'series' ? `&season=${activeSeason}&episode=1` : ''
+                      }`}
+                      aria-disabled={dead}
+                      onClick={(e) => dead && e.preventDefault()}
+                      className={cn(
+                        'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors',
+                        dead
+                          ? 'opacity-45'
+                          : s.kind === 'embed'
+                            ? 'border border-dashed border-line hover:bg-elevated'
+                            : 'hover:bg-elevated'
                       )}
-                    </div>
-                    <div className="flex flex-none items-center gap-2">
-                      {isDemo ? (
-                        <Badge variant="default">Test</Badge>
-                      ) : isProbablyPlayable(stream) ? (
-                        <Badge variant="success">Playable</Badge>
-                      ) : (
-                        <Badge variant="warning">P2P</Badge>
-                      )}
-                      {stream.quality && !isDemo && (
-                        <Badge variant="primary">{stream.quality}</Badge>
-                      )}
-                    </div>
-                  </button>
+                    >
+                      <span
+                        className={cn(
+                          'badge flex-none',
+                          s.kind === 'embed' ? 'badge-default' : dead ? 'badge-danger' : 'badge-success'
+                        )}
+                      >
+                        {s.kind === 'embed' ? 'Trailer' : dead ? 'Failed' : s.quality ?? 'HD'}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-text-secondary">{s.label}</span>
+                    </Link>
+                  </li>
                 );
               })}
+            </ul>
+            {archive.isFetching ? (
+              <p className="mt-2 text-[11px] text-text-muted">Looking for more sources…</p>
+            ) : null}
+          </div>
+        ) : archive.isLoading ? (
+          <div className="mt-5 rounded-xl border border-line bg-card p-3.5">
+            <div className="skeleton h-4 w-24" />
+            <div className="mt-3 space-y-2">
+              <div className="skeleton h-9 w-full rounded-lg" />
+              <div className="skeleton h-9 w-3/4 rounded-lg" />
             </div>
-          )}
-        </section>
-
-        {/* Subtitles */}
-        {subtitles.length > 0 && (
-          <section className="mt-8">
-            <h2 className="mb-3 text-lg font-semibold text-text">{t('subtitles')}</h2>
-            <div className="flex flex-wrap gap-2">
-              {subtitles.slice(0, 24).map((sub) => (
-                <Badge key={sub.id}>{sub.title || sub.lang}</Badge>
-              ))}
-            </div>
-          </section>
+          </div>
+        ) : (
+          <div className="mt-5 rounded-xl border border-line bg-card p-3.5">
+            <p className="text-sm text-text-muted">
+              No full-length source is available for this title. The trailer still plays.
+            </p>
+          </div>
         )}
 
+        {/* Overview */}
+        {media.overview ? (
+          <div className="mt-6">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-text-muted">Overview</h2>
+            <p className="mt-2 text-sm leading-relaxed text-text-secondary">{media.overview}</p>
+          </div>
+        ) : null}
+
         {/* Cast */}
-        {cast.length > 0 && (
-          <section className="mt-8">
-            <h2 className="mb-3 text-lg font-semibold text-text">{t('cast')}</h2>
-            <div className="rail gap-3 pb-2">
-              {cast.map((person) => (
-                <div key={person.id} className="rail-item w-20 flex-none text-center">
-                  {person.profile_path ? (
-                    <img
-                      src={tmdb.getProfileUrl(person.profile_path) ?? ''}
-                      alt={person.name}
-                      loading="lazy"
-                      className="h-20 w-20 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex h-20 w-20 items-center justify-center rounded-full bg-surface-hover text-lg font-semibold text-text-muted">
-                      {person.name.charAt(0)}
-                    </div>
+        {media.cast.length > 0 ? (
+          <div className="mt-7">
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-text-muted">Cast</h2>
+            <div className="rail rail-bleed fade-edges">
+              {media.cast.slice(0, 12).map((p) => (
+                <div key={p.id} className="w-24 flex-none text-center">
+                  <div className="mx-auto h-24 w-24 overflow-hidden rounded-full bg-card">
+                    {p.profile ? (
+                      <img
+                        src={p.profile}
+                        alt={p.name}
+                        loading="lazy"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <span className="flex h-full w-full items-center justify-center text-2xl font-bold text-text-muted">
+                        {p.name.charAt(0)}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-2 truncate text-xs font-medium text-text">{p.name}</p>
+                  {p.character && (
+                    <p className="truncate text-[11px] text-text-muted">{p.character}</p>
                   )}
-                  <p className="mt-2 truncate text-xs text-text">{person.name}</p>
                 </div>
               ))}
             </div>
-          </section>
-        )}
+          </div>
+        ) : null}
 
-        {/* Trailers — plays in-app from the TMDB videos endpoint */}
-        {videos.length > 0 && (
-          <section className="mt-8">
-            <h2 className="mb-3 text-lg font-semibold text-text">{t('trailers')}</h2>
-            <div className="rail rail-bleed gap-2.5 pb-2">
-              {videos.slice(0, 8).map((v) => {
-                return (
-                  <button
-                    key={v.id}
-                    onClick={() => setTrailer(videos.indexOf(v))}
-                    className="rail-item w-56 flex-none text-left"
-                  >
-                    <div className="flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-black">
-                      {v.key ? (
-                        <img
-                          src={`https://i.ytimg.com/vi/${v.key}/mqdefault.jpg`}
-                          alt=""
-                          loading="lazy"
-                          className="h-full w-full object-cover"
-                        />
-                      ) : null}
-                      <span className="absolute flex h-11 w-11 items-center justify-center rounded-full bg-black/60">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
-                          <path d="M6 4l14 8-14 8V4z" />
-                        </svg>
-                      </span>
-                    </div>
-                    <p className="mt-1.5 truncate text-xs text-text-muted">{v.name}</p>
-                    <p className="text-[10px] uppercase tracking-wide text-text-muted/70">{v.type}</p>
-                  </button>
-                );
-              })}
+        {/* Episode browser */}
+        {type === 'series' ? (
+          <div className="mt-8">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-text-muted">Episodes</h2>
+              {seasons.length > 1 ? (
+                <select
+                  value={activeSeason}
+                  onChange={(e) => setSeason(Number(e.target.value))}
+                  aria-label="Select season"
+                  className="input h-9 w-auto py-0 pr-8 text-xs"
+                >
+                  {seasons.map((s) => (
+                    <option key={s.season} value={s.season}>
+                      Season {s.season}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
             </div>
-          </section>
-        )}
+
+            {episodes.length === 0 ? (
+              <EmptyState title="No episodes listed yet" message="TMDB has no episode data for this season." />
+            ) : (
+              <ul className="space-y-1.5">
+                {episodes.map((ep) => (
+                  <EpisodeRow
+                    key={ep.id}
+                    media={media}
+                    episode={ep}
+                    activeSeason={activeSeason}
+                    progress={useProgressFor(String(media.id))}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : null}
+
+        {/* Related */}
+        {related.data && related.data.length > 0 ? (
+          <div className="mt-10">
+            <MediaRow title="More Like This" items={related.data} to="/discover" />
+          </div>
+        ) : null}
       </div>
 
-      {trailer !== null && (
-        <TrailerModal
-          videos={videos}
-          onBack={() => setTrailer(null)}
-          onClose={() => setTrailer(null)}
-        />
-      )}
-      {player && (
-        <PlayerModal
-          stream={player}
-          subtitles={subtitles}
-          title={title}
-          onNext={!isMovie ? goToNextEpisode : undefined}
-          nextLabel={!isMovie ? `${t('nextEpisode')} · S${season} E${episode + 1}` : undefined}
-          onProgress={(seconds, duration) => {
-            if (duration > 0) {
-              updateProgress({
-                type: mediaType,
-                id: rawId,
-                progress: seconds,
-                duration,
-                title,
-                poster: details?.poster_path ?? meta?.poster ?? undefined,
-                season,
-                episode,
-              });
-            }
-          }}
-          onClose={() => {
-            setPlayer(null);
-            if (autoplay) navigate(`/${mediaType}/${rawId}`, { replace: true });
-          }}
-        />
-      )}
+      {trailerOpen && media.trailerKey ? (
+        <TrailerModal videoKey={media.trailerKey} onClose={() => setTrailerOpen(false)} />
+      ) : null}
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ */
+
+function EpisodeRow({
+  media,
+  episode,
+  activeSeason,
+  progress,
+}: {
+  media: { id: string; title: string; type: MediaType };
+  episode: Episode;
+  activeSeason: number;
+  progress?: { season?: number; episode?: number; time: number; duration: number };
+}) {
+  const isCurrent =
+    progress?.season === activeSeason && progress.episode === episode.episode;
+  const pct = isCurrent && progress && progress.duration > 0 ? (progress.time / progress.duration) * 100 : 0;
+
+  return (
+    <li>
+      <Link
+        to={`/player/${media.id}?season=${activeSeason}&episode=${episode.episode}`}
+        className="group flex gap-3 rounded-xl p-2 transition-colors hover:bg-elevated"
+      >
+        <div className="relative h-16 w-28 flex-none overflow-hidden rounded-lg bg-card">
+          {episode.still ? (
+            <img
+              src={episode.still}
+              alt=""
+              loading="lazy"
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          ) : null}
+          <span className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition-opacity group-hover:opacity-100">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="white" aria-hidden>
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </span>
+          {pct > 0 ? (
+            <span className="absolute inset-x-0 bottom-0 h-[3px] bg-white/25">
+              <span className="block h-full bg-[var(--color-accent)]" style={{ width: `${pct}%` }} />
+            </span>
+          ) : null}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2">
+            <span className="text-xs font-semibold tabular-nums text-text-muted">
+              E{episode.episode}
+            </span>
+            <h3 className="min-w-0 flex-1 truncate text-sm font-semibold text-text">
+              {episode.title}
+            </h3>
+            <span className="flex-none text-[11px] text-text-muted">{episode.runtime}m</span>
+          </div>
+          {episode.overview ? (
+            <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-text-muted">
+              {episode.overview}
+            </p>
+          ) : null}
+          {episode.airDate ? (
+            <p className="mt-1 text-[11px] text-text-muted">
+              Aired {LONG_DATE.format(new Date(episode.airDate))}
+            </p>
+          ) : null}
+        </div>
+      </Link>
+    </li>
+  );
+}
+
+/**
+ * TMDB genre ids, so the genre chips can link into a filtered Discover.
+ * Movie and TV share most ids but not all, hence two tables.
+ */
+const MOVIE_GENRE_IDS: Record<string, number> = {
+  Action: 28, Adventure: 12, Animation: 16, Comedy: 35, Crime: 80,
+  Documentary: 99, Drama: 18, Family: 10751, Fantasy: 14, History: 36,
+  Horror: 27, 'Music': 10402, Mystery: 9648, Romance: 10749,
+  'Science Fiction': 878, Thriller: 53, War: 10752, Western: 37,
+};
+
+const TV_GENRE_IDS: Record<string, number> = {
+  Action: 28, Adventure: 12, Animation: 16, Comedy: 35, Crime: 80,
+  Documentary: 99, Drama: 18, Family: 10759, 'Kids': 10762, Mystery: 9648,
+  News: 10763, Reality: 10764, 'Sci-Fi & Fantasy': 10765, Soap: 10766,
+  Talk: 10767, War: 10752,
+};
+
+const GENRE_IDS: Record<string, number> = { ...MOVIE_GENRE_IDS, ...TV_GENRE_IDS };

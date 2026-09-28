@@ -1,83 +1,61 @@
-import { useState } from 'react';
-import type { TMDBVideo } from '../services/tmdb';
-
-interface TrailerModalProps {
-  videos: TMDBVideo[];
-  onClose: () => void;
-  onBack: () => void;
-}
+import { useEffect, useState } from 'react';
+import { XIcon } from './ui';
 
 /**
  * In-app trailer playback.
  *
- * These come from the TMDB `/videos` endpoint, which returns YouTube ids rather
+ * These come from TMDB's /videos endpoint, which returns YouTube ids rather
  * than media files — TMDB hosts no video content itself. Embedding the YouTube
- * player is the one form of "play something" that works without a debrid
- * account.
+ * player is the one form of "play something" that works without an account.
  */
-export function TrailerModal({ videos, onClose, onBack }: TrailerModalProps) {
-  const [index, setIndex] = useState(0);
-  const video = videos[index];
+export function TrailerModal({ videoKey, onClose }: { videoKey: string; onClose: () => void }) {
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-[100] flex flex-col bg-black">
-      <div className="flex flex-none items-center gap-3 px-3 py-2">
-        <button
-          onClick={onBack}
-          className="rounded-full p-2 text-white/90 hover:bg-white/10"
-          aria-label="Back"
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
-        <h3 className="min-w-0 flex-1 truncate text-sm font-medium text-white">
-          {video.name}
-        </h3>
-        {videos.length > 1 && (
-          <span className="flex-none text-xs tabular-nums text-white/50">
-            {index + 1} / {videos.length}
-          </span>
-        )}
+    <div
+      className="fade-in fixed inset-0 z-[110] flex flex-col bg-black/95"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Trailer"
+    >
+      <div className="flex flex-none items-center justify-end p-2">
         <button
           onClick={onClose}
-          className="flex-none rounded-full p-2 text-white/90 hover:bg-white/10"
-          aria-label="Close"
+          aria-label="Close trailer"
+          className="rounded-full p-2 text-white/90 transition-colors hover:bg-white/10"
         >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" d="M6 6l12 12M18 6L6 18" />
-          </svg>
+          <XIcon />
         </button>
       </div>
 
-      <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black">
+      <div className="relative min-h-0 flex-1">
         <iframe
-          key={video.key}
-          src={`https://www.youtube-nocookie.com/embed/${video.key}?autoplay=1&rel=0&modestbranding=1`}
-          title={video.name}
+          // `youtube-nocookie` still sets its own cookies, but it does not
+          // touch the viewer's until play, and it blocks the ad/analytics
+          // preload requests the regular embed makes.
+          src={`https://www.youtube-nocookie.com/embed/${videoKey}?autoplay=1&rel=0&modestbranding=1`}
+          title="Trailer"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
           allowFullScreen
           className="h-full w-full border-0"
         />
+        {!ready ? (
+          <div
+            className="pointer-events-none absolute inset-0 flex items-center justify-center"
+            onLoad={() => setReady(true)}
+          >
+            <span className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+          </div>
+        ) : null}
       </div>
-
-      {videos.length > 1 && (
-        <div className="flex flex-none gap-2 overflow-x-auto scrollbar-hide border-t border-white/10 px-3 py-2">
-          {videos.map((v, i) => (
-            <button
-              key={v.id}
-              onClick={() => setIndex(i)}
-              className={
-                i === index
-                  ? 'flex-none rounded-full bg-primary px-3 py-1 text-xs font-medium text-white'
-                  : 'flex-none rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/75'
-              }
-            >
-              {v.type}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

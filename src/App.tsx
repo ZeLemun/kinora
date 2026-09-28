@@ -1,155 +1,106 @@
-import { Routes, Route, Outlet, Link, useLocation } from 'react-router-dom';
-import { TranslationProvider, useTranslation } from './hooks/useTranslation';
+import { useEffect } from 'react';
+import { Route, Routes, useLocation } from 'react-router-dom';
+import { Sidebar, BottomNav } from './components/Shell';
+import { MiniPlayer } from './components/MiniPlayer';
+import { ToastProvider } from './components/ui';
+import { PlayerProvider } from './hooks/usePlayer';
+import { useAppStore } from './store/app-store';
+import { useIsLandscape, useKeyboardOpen } from './hooks/useViewport';
 import { HomePage } from './pages/HomePage';
+import { DiscoverPage } from './pages/DiscoverPage';
+import { CatalogPage } from './pages/CatalogPage';
 import { SearchPage } from './pages/SearchPage';
-import { BrowsePage } from './pages/BrowsePage';
 import { LibraryPage } from './pages/LibraryPage';
 import { DetailPage } from './pages/DetailPage';
 import { SettingsPage } from './pages/SettingsPage';
-import { AddonsPage } from './pages/AddonsPage';
-import { cn } from './utils/cn';
-import { useAppStore } from './store/app-store';
-import { useEffect } from 'react';
-import { useIsLandscape, useKeyboardOpen } from './hooks/useViewport';
+import { SportsPage } from './pages/SportsPage';
+import { PlayerPage } from './pages/PlayerPage';
 
-interface TabConfig {
-  path: string;
-  /** i18n key, so the nav follows the selected language. */
-  label: 'home' | 'search' | 'library' | 'settings';
-  icon: React.FC<{ className?: string }>;
-}
-
-const tabs: TabConfig[] = [
-  { path: '/', label: 'home', icon: HomeIcon },
-  { path: '/search', label: 'search', icon: SearchIcon },
-  { path: '/library', label: 'library', icon: LibraryIcon },
-  { path: '/settings', label: 'settings', icon: SettingsIcon },
-];
-
-function HomeIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-      <polyline points="9 22 9 12 15 12 15 22" />
-    </svg>
-  );
-}
-
-function SearchIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="11" cy="11" r="8" />
-      <path d="M21 21l-4.35-4.35" />
-    </svg>
-  );
-}
-
-function LibraryIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-    </svg>
-  );
-}
-
-function SettingsIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
-  );
-}
-
-function BottomNav() {
+/**
+ * App shell.
+ *
+ * The player is a route that fills the whole viewport, so the sidebar and nav
+ * are hidden while it is mounted — a video with a sidebar beside it defeats the
+ * point, and by then the native plugin has already hidden the system bars.
+ */
+function Shell() {
   const location = useLocation();
-  const { t } = useTranslation();
+  const isPlayer = location.pathname.startsWith('/player/');
   const isLandscape = useIsLandscape();
   const keyboardOpen = useKeyboardOpen();
+  const theme = useAppStore((s) => s.settings.theme);
 
-  // In landscape the soft keyboard eats the bottom of the screen, so the bar
+  // In landscape the soft keyboard eats the bottom of the screen, so the nav
   // would sit on top of whatever is being typed. Hide it for that case only.
-  const hidden = isLandscape && keyboardOpen;
+  const navHidden = isLandscape && keyboardOpen;
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      const dark = theme === 'dark' || (theme === 'system' && mq.matches);
+      document.documentElement.classList.toggle('dark', dark);
+      document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, [theme]);
+
+  // A client-side route change does not reset scroll, so do it here.
+  useEffect(() => {
+    document.querySelector('main')?.scrollTo(0, 0);
+  }, [location.pathname]);
 
   return (
-    <nav
-      aria-hidden={hidden}
-      className={cn(
-        'safe-bottom z-50 flex-none overflow-hidden border-t border-white/5 bg-background/95 backdrop-blur-md transition-[max-height,opacity] duration-200',
-        hidden ? 'max-h-0 opacity-0' : 'max-h-24 opacity-100'
-      )}
-    >
-      {/* Full width in landscape so there are no dead bars beside the nav. */}
-      <div className="mx-auto flex h-16 max-w-lg items-stretch justify-around px-2 py-1.5 [@media(orientation:landscape)]:max-w-none">
-        {tabs.map((tab) => {
-          const isActive =
-            tab.path === '/' ? location.pathname === '/' : location.pathname.startsWith(tab.path);
-          return (
-            <Link
-              key={tab.path}
-              to={tab.path}
-              aria-label={t(tab.label)}
-              aria-current={isActive ? 'page' : undefined}
-              className={cn(
-                // Fixed height + flex-col keeps every label on the same baseline.
-                'flex h-14 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 transition-colors',
-                isActive ? 'bg-primary/20 text-primary' : 'text-text-muted'
-              )}
-            >
-              <tab.icon className="h-[22px] w-[22px]" />
-              <span className="truncate text-[10px] leading-none font-medium">{t(tab.label)}</span>
-            </Link>
-          );
-        })}
+    <div className="flex h-[100dvh] overflow-hidden bg-background">
+      {!isPlayer ? <Sidebar /> : null}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+          {!isPlayer ? <TopBar /> : null}
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/discover" element={<DiscoverPage />} />
+            <Route path="/movies" element={<CatalogPage type="movie" />} />
+            <Route path="/series" element={<CatalogPage type="series" />} />
+            <Route path="/search" element={<SearchPage />} />
+            <Route path="/library" element={<LibraryPage />} />
+            <Route path="/watchlist" element={<LibraryPage initialTab="watchlist" />} />
+            <Route path="/favorites" element={<LibraryPage initialTab="favorites" />} />
+            <Route path="/sports" element={<SportsPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/movie/:id" element={<DetailPage type="movie" />} />
+            <Route path="/series/:id" element={<DetailPage type="series" />} />
+            <Route path="/player/:id" element={<PlayerPage />} />
+            <Route path="*" element={<HomePage />} />
+          </Routes>
+        </main>
+
+        {!isPlayer && !navHidden ? <BottomNav /> : null}
+        <MiniPlayer />
       </div>
-    </nav>
-  );
-}
-
-function Layout() {
-  return (
-    // App-shell: the nav is a flex sibling of the scroll area, so it can never
-    // be scrolled out of view the way a `fixed` element can inside a WebView.
-    <div className="safe-area flex h-[100dvh] flex-col overflow-hidden bg-background">
-      <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-        <Outlet />
-      </main>
-      <BottomNav />
     </div>
   );
 }
 
-function AppRoutes() {
+/** Compact header for narrow screens; the sidebar is desktop-only. */
+function TopBar() {
   return (
-    <Routes>
-      <Route path="/" element={<Layout />}>
-        <Route index element={<HomePage />} />
-        <Route path="search" element={<SearchPage />} />
-        <Route path="browse/:type/:catalog" element={<BrowsePage />} />
-        <Route path="library" element={<LibraryPage />} />
-        <Route path="settings" element={<SettingsPage />} />
-        <Route path="addons" element={<AddonsPage />} />
-        <Route path=":type/:id" element={<DetailPage />} />
-        <Route path="watch/:type/:id" element={<DetailPage />} />
-      </Route>
-    </Routes>
+    <header className="safe-top sticky top-0 z-40 flex h-14 flex-none items-center gap-3 border-b border-line bg-background/90 px-4 backdrop-blur-xl sm:px-6 lg:hidden">
+      <span className="flex h-7 w-7 flex-none items-center justify-center rounded-lg bg-[var(--color-accent)] text-xs font-black text-white">
+        K
+      </span>
+      <span className="flex-1 truncate text-base font-bold tracking-tight text-text">Kinora</span>
+    </header>
   );
 }
 
-function App() {
-  const { theme, setTheme } = useAppStore();
-
-  useEffect(() => {
-    setTheme(theme);
-    document.documentElement.classList.toggle('dark', theme === 'dark');
-  }, [theme, setTheme]);
-
+export default function App() {
   return (
-    <TranslationProvider>
-      <AppRoutes />
-    </TranslationProvider>
+    <ToastProvider>
+      <PlayerProvider>
+        <Shell />
+      </PlayerProvider>
+    </ToastProvider>
   );
 }
-
-export default App;
