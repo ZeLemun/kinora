@@ -96,11 +96,21 @@ Vite + React 19 + TS + Tailwind v4 + Capacitor 8  →  Android (done)  →  iOS 
   TheSportsDB's free key `3`. Both send `Access-Control-Allow-Origin: *`, so
   the app needs no server for either.
 - **Playback sources (`src/services/sources.ts`, `src/services/probe.ts`):**
-  Internet Archive public-domain films, plus a YouTube trailer embed as the
-  always-available fallback. Candidates are health-checked with a 1 KB range
-  request before being handed to `<video>`; a `fetch` network failure is
-  reported as "unverified" rather than "dead", because that is usually CORS and
-  a `<video>` without `crossOrigin` is not CORS-checked.
+  Two tiers. Direct files come from Internet Archive public-domain titles and
+  go to `<video>`; candidates are health-checked with a 1 KB range request
+  first. A `fetch` network failure is reported as "unverified" rather than
+  "dead", because that is usually CORS and a `<video>` without `crossOrigin`
+  is not CORS-checked. Everything else is an `embed` — a page for an
+  `<iframe>`, never probed, never passed to `<video>`.
+- **Embed providers (`src/services/embed-providers.ts`, `src/components/EmbedPlayer.tsx`):**
+  vidsrc.to, multiembed.mov (superembed) and vaplayer.ru (vidapi), keyed on the
+  TMDB id. These are the primary watch path for current releases — the archive
+  tier is gated to public domain and returns nothing for a modern film.
+  `superembed_vip` was removed after `directstream.php` answered 404 for every
+  id. A provider frame is an opaque document, so `EmbedPlayer` offers only
+  exit / reload / change-source; its own controls are already inside the frame.
+  **Match YouTube trailers by host, not by pattern** — `vidsrc.to/embed/movie/550`
+  matches `/embed/(\w+)/` and yields the string "movie".
 - **No add-on layer.** No marketplace, no torrent, no P2P, no external catalogs.
   A `MediaSource` is a plain URL that a `<video>` can play directly.
 - **Streams/subtitles:** `src/services/addon-client.ts` — a **direct addon-v3 HTTP client**
