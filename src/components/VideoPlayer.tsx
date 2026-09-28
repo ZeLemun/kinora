@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from 'react';
 import { cn } from '../utils/cn';
-import { useAppStore } from '../store/app-store';
+import { useAppStore, selectAutoplayNextEpisode } from '../store/app-store';
 import { immersive } from '../services/immersive';
 
 /* ------------------------------------------------------------------ */
@@ -78,7 +78,7 @@ export function VideoPlayer({
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seekedToStart = useRef(false);
 
-  const autoplayNextEpisode = useAppStore((s) => s.settings.autoplayNextEpisode);
+  const autoplayNextEpisode = useAppStore(selectAutoplayNextEpisode);
 
   const [playing, setPlaying] = useState(autoPlay);
   const [muted, setMuted] = useState(false);

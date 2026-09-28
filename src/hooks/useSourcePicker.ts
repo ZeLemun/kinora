@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { MediaSource } from '../store/app-store';
 import {
   bestSource,
@@ -25,7 +25,7 @@ export function useSourcePicker(sources: MediaSource[], enabled: boolean) {
   const startedFor = useRef<string>('');
 
   // A stable key for "the same set of candidate URLs".
-  const key = sources.map((s) => s.url).join('|');
+  const key = useMemo(() => sources.map((s) => s.url).join('|'), [sources]);
 
   useEffect(() => {
     if (!enabled || sources.length === 0) return;
@@ -65,22 +65,22 @@ export function useSourcePicker(sources: MediaSource[], enabled: boolean) {
     })();
 
     return () => controller.abort();
-  }, [key, enabled, sources]);
+  }, [key, enabled]);
 
   /** Every source, best first. `embed` entries sort last. */
-  const ranked = rankWithEmbeds(sources, probes);
+  const ranked = useMemo(() => rankWithEmbeds(sources, probes), [key, probes]);
 
   /** The first source that passed, else the first un-failed one. */
-  const best = pickBest(sources, probes);
+  const best = useMemo(() => pickBest(sources, probes), [key, probes]);
 
-  const counts = sources.reduce(
+  const counts = useMemo(() => sources.reduce(
     (acc, s) => {
       const state: ProbeState = s.kind === 'embed' ? 'ok' : probes[s.url]?.state ?? 'pending';
       acc[state] = (acc[state] ?? 0) + 1;
       return acc;
     },
     {} as Partial<Record<ProbeState, number>>
-  );
+  ), [key, probes]);
 
   return { probes, checking, ranked, best, counts };
 }

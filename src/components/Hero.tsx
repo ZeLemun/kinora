@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAppStore, type Media } from '../store/app-store';
+import { useAppStore, useIsFavorite, useIsInWatchlist, type Media, selectToggleFavorite, selectToggleWatchlist } from '../store/app-store';
 import { mediaHref } from './MediaCard';
 import { Skeleton, useToast } from './ui';
 import { cn } from '../utils/cn';
@@ -11,10 +11,10 @@ const fmtRuntime = (min?: number) => (min ? `${Math.floor(min / 60)}h ${min % 60
 export function Hero({ items, isLoading }: { items: Media[]; isLoading?: boolean }) {
   const { toast } = useToast();
   const [index, setIndex] = useState(0);
-  const toggleWatchlist = useAppStore((s) => s.toggleWatchlist);
-  const toggleFavorite = useAppStore((s) => s.toggleFavorite);
-  const isListed = useAppStore((s) => (items[index] ? s.watchlist.includes(items[index].id) : false));
-  const isFav = useAppStore((s) => (items[index] ? s.favorites.includes(items[index].id) : false));
+  const toggleWatchlist = useAppStore(selectToggleWatchlist);
+  const toggleFavorite = useAppStore(selectToggleFavorite);
+  const isListed = useIsInWatchlist(items[index]?.id ?? '');
+  const isFav = useIsFavorite(items[index]?.id ?? '');
 
   useEffect(() => {
     if (items.length <= 1) return;
@@ -81,7 +81,7 @@ export function Hero({ items, isLoading }: { items: Media[]; isLoading?: boolean
             ) : null}
             {item.year && <span>{item.year}</span>}
             {fmtRuntime(item.runtime) && <span>{fmtRuntime(item.runtime)}</span>}
-            {item.genres.slice(0, 2).map((g) => (
+            {item.genres.slice(0, 2).map((g: string) => (
               <span key={g}>{g}</span>
             ))}
           </div>

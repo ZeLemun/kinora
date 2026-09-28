@@ -3,7 +3,10 @@ import { Link, useSearchParams } from 'react-router-dom';
 import {
   useAppStore,
   useContinueWatching,
+  useFavorites,
   useHistory,
+  useWatchlist,
+  selectClearProgress,
   type Media,
   type ProgressRecord,
 } from '../store/app-store';
@@ -34,8 +37,8 @@ export function LibraryPage({ initialTab = 'progress' }: { initialTab?: Tab }) {
 
   const { toast } = useToast();
   const progress = useContinueWatching();
-  const watchlist = useAppStore((s) => s.watchlist);
-  const favorites = useAppStore((s) => s.favorites);
+  const watchlist = useWatchlist();
+  const favorites = useFavorites();
   const history = useHistory();
 
   const select = (next: Tab) => {
@@ -199,7 +202,7 @@ function recordToMedia(p: ProgressRecord): Media {
 
 function ProgressCard({ record }: { record: ProgressRecord }) {
   const pct = record.duration > 0 ? (record.time / record.duration) * 100 : 0;
-  const clearProgress = useAppStore((s) => s.clearProgress);
+  const clearProgress = useAppStore(selectClearProgress);
   const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuAnchor = useRef<HTMLButtonElement>(null);

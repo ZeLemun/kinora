@@ -14,6 +14,8 @@ import {
   useIsFavorite,
   useIsInWatchlist,
   useProgressFor,
+  selectToggleWatchlist,
+  selectToggleFavorite,
   type Episode,
   type MediaType,
 } from '../store/app-store';
@@ -65,8 +67,8 @@ export function DetailPage({ type }: { type: MediaType }) {
   const isWatchlisted = useIsInWatchlist(String(mediaId));
   const isFavorite = useIsFavorite(String(mediaId));
   const progress = useProgressFor(String(mediaId));
-  const toggleWatchlist = useAppStore((s) => s.toggleWatchlist);
-  const toggleFavorite = useAppStore((s) => s.toggleFavorite);
+  const toggleWatchlist = useAppStore(selectToggleWatchlist);
+  const toggleFavorite = useAppStore(selectToggleFavorite);
 
   const related = useQuery({
     queryKey: ['similar', type, mediaId],

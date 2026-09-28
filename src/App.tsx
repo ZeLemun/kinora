@@ -4,7 +4,7 @@ import { Sidebar, BottomNav } from './components/Shell';
 import { MiniPlayer } from './components/MiniPlayer';
 import { ToastProvider } from './components/ui';
 import { PlayerProvider } from './hooks/usePlayer';
-import { useAppStore } from './store/app-store';
+import { useAppStore, selectTheme } from './store/app-store';
 import { useIsLandscape, useKeyboardOpen } from './hooks/useViewport';
 import { HomePage } from './pages/HomePage';
 import { DiscoverPage } from './pages/DiscoverPage';
@@ -28,7 +28,7 @@ function Shell() {
   const isPlayer = location.pathname.startsWith('/player/');
   const isLandscape = useIsLandscape();
   const keyboardOpen = useKeyboardOpen();
-  const theme = useAppStore((s) => s.settings.theme);
+  const theme = useAppStore(selectTheme);
 
   // In landscape the soft keyboard eats the bottom of the screen, so the nav
   // would sit on top of whatever is being typed. Hide it for that case only.

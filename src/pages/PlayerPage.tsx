@@ -9,7 +9,7 @@ import { TrailerModal } from '../components/TrailerModal';
 import { EmptyState } from '../components/ui';
 import { usePlayer } from '../hooks/usePlayer';
 import { useSourcePicker } from '../hooks/useSourcePicker';
-import { useAppStore, type Episode, type Media, type MediaSource } from '../store/app-store';
+import { useAppStore, type Episode, type Media, type MediaSource, selectProgressFor, selectRememberPosition, selectSetProgressAction, selectMarkWatchedAction } from '../store/app-store';
 
 /** Opening/credits run we let the viewer skip past. */
 const SKIP_INTRO = 90;
@@ -52,10 +52,10 @@ export function PlayerPage() {
   const announced = useRef(false);
 
   const recordId = String(mediaId);
-  const setProgress = useAppStore((s) => s.setProgress);
-  const markWatched = useAppStore((s) => s.markWatched);
-  const progress = useAppStore((s) => s.progress[recordId]);
-  const rememberPosition = useAppStore((s) => s.settings.rememberPosition);
+  const setProgress = useAppStore(selectSetProgressAction);
+  const markWatched = useAppStore(selectMarkWatchedAction);
+  const progress = useAppStore(selectProgressFor(recordId));
+  const rememberPosition = useAppStore(selectRememberPosition);
 
   const detail = useQuery({
     queryKey: ['player', isSeriesUrl ? 'series' : 'movie', mediaId],

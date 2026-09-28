@@ -253,3 +253,42 @@ export const useContinueWatching = () =>
   );
 
 export const useHistory = () => useAppStore(useShallow((s) => [...s.history].reverse()));
+
+/** Watchlist as a stable array reference (for iteration). */
+export const useWatchlist = () => useAppStore(useShallow((s) => s.watchlist));
+
+/** Favorites as a stable array reference (for iteration). */
+export const useFavorites = () => useAppStore(useShallow((s) => s.favorites));
+
+/** Theme selector - stable reference for theme value. */
+export const selectTheme = (s: AppState) => s.settings.theme;
+
+/** Autoplay next episode setting. */
+export const selectAutoplayNextEpisode = (s: AppState) => s.settings.autoplayNextEpisode;
+
+/** Remember position setting. */
+export const selectRememberPosition = (s: AppState) => s.settings.rememberPosition;
+
+/** Progress record for a specific media ID. */
+export const selectProgressFor = (id: string) => (s: AppState) => s.progress[mediaKey(id)];
+
+/** Set progress action. */
+export const selectSetProgress = (s: AppState) => s.setProgress;
+
+/** Mark watched action. */
+export const selectMarkWatched = (s: AppState) => s.markWatched;
+
+/** Clear progress action. */
+export const selectClearProgress = (s: AppState) => s.clearProgress;
+
+/** Toggle watchlist action. */
+export const selectToggleWatchlist = (s: AppState) => s.toggleWatchlist;
+
+/** Toggle favorite action. */
+export const selectToggleFavorite = (s: AppState) => s.toggleFavorite;
+
+/** Set progress action. */
+export const selectSetProgressAction = (s: AppState) => s.setProgress;
+
+/** Mark watched action. */
+export const selectMarkWatchedAction = (s: AppState) => s.markWatched;

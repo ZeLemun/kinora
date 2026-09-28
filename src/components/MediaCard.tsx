@@ -1,6 +1,6 @@
 import { memo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAppStore, useIsFavorite, useIsInWatchlist, useProgressFor, type Media } from '../store/app-store';
+import { useAppStore, useIsFavorite, useIsInWatchlist, useProgressFor, type Media, selectToggleFavorite, selectToggleWatchlist } from '../store/app-store';
 import { cn } from '../utils/cn';
 import { ContextMenu, type MenuItem } from './ui';
 import { useToast } from './ui';
@@ -48,8 +48,8 @@ export const PosterCard = memo(function PosterCard({ media }: { media: Media }) 
   const isFav = useIsFavorite(media.id);
   const isListed = useIsInWatchlist(media.id);
   const progress = useProgressFor(media.id);
-  const toggleFavorite = useAppStore((s) => s.toggleFavorite);
-  const toggleWatchlist = useAppStore((s) => s.toggleWatchlist);
+  const toggleFavorite = useAppStore(selectToggleFavorite);
+  const toggleWatchlist = useAppStore(selectToggleWatchlist);
   const menuRef = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
