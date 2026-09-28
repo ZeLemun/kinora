@@ -4,6 +4,7 @@ import { useTranslation } from '../hooks/useTranslation';
 import { useMeta, useStreams, useSubtitles, useLibrary, useFavorites } from '../hooks/useStremio';
 import { useDetails, tmdb } from '../hooks/useTMDB';
 import { isProbablyPlayable } from '../services/addon-client';
+import { TrailerModal } from '../components/TrailerModal';
 import { formatRuntime, formatYear, formatRating, cn } from '../utils/cn';
 import { Button, Badge } from '../components/ui/basic';
 import { ErrorFallback, LoadingState } from '../components/ErrorFallback';
@@ -44,6 +45,7 @@ export function DetailPage() {
   const [season, setSeason] = useState(1);
   const [episode, setEpisode] = useState(1);
   const [player, setPlayer] = useState<Stream | null>(null);
+  const [trailer, setTrailer] = useState<number | null>(null);
 
   const streamId = !isMovie && imdbId ? `${imdbId}:${season}:${episode}` : imdbId;
   const { data: streamsData, isLoading: streamsLoading } = useStreams(mediaType, streamId);
@@ -56,21 +58,15 @@ export function DetailPage() {
 
   // Torrent/P2P sources, magnets and add-on error placeholders cannot play in a
   // WebView. When that is all we have, append a labelled test clip so the player
-  // itself can still be verified.
-  const playableCount = streams.filter(isProbablyPlayable).length;
-  const sourceList =
-    playableCount > 0
-      ? streams
-      : [...streams, DEMO_STREAM].map((s) =>
-          s === DEMO_STREAM && streams.length > 0
-            ? {
-                ...DEMO_STREAM,
-                title: `${DEMO_STREAM.title} (${streams.length} unplayable source${streams.length === 1 ? '' : 's'} found above)`,
-              }
-            : s
-        );
-  /** Always prefer something the <video> element can load. */
-  const firstPlayable = sourceList.find(isProbablyPlayable) ?? sourceList[0];
+  // itself can still be verified — but never auto-select it.
+  const realPlayable = streams.filter(isProbablyPlayable);
+  const sourceList = realPlayable.length > 0 ? streams : [...streams, DEMO_STREAM];
+  /** Only real sources drive Watch Now; the demo must be tapped explicitly. */
+  const firstPlayable = realPlayable[0];
+  const demoTitle =
+    streams.length > 0
+      ? `${DEMO_STREAM.title} (${streams.length} unplayable source${streams.length === 1 ? '' : 's'} found above)`
+      : DEMO_STREAM.title;
 
   const title = meta?.name ?? details?.title ?? details?.name ?? rawId;
   const overview = meta?.description ?? details?.overview ?? t('noDescription');
@@ -360,30 +356,46 @@ export function DetailPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              {sourceList.map((stream, i) => (
-                <button
-                  key={`${stream.url}-${i}`}
-                  onClick={() => setPlayer(stream)}
-                  className="flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 text-left transition-colors hover:bg-surface-hover"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-text">
-                      {stream.title || stream.behaviorHints?.bingeGroup || `Source ${i + 1}`}
-                    </p>
-                    {stream.behaviorHints?.filename && (
-                      <p className="truncate text-xs text-text-muted">{stream.behaviorHints.filename}</p>
+              {sourceList.map((stream, i) => {
+                const isDemo = stream.url === DEMO_STREAM.url;
+                return (
+                  <button
+                    key={`${stream.url}-${i}`}
+                    onClick={() => setPlayer(isDemo ? { ...stream, title: demoTitle } : stream)}
+                    className={cn(
+                      'flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left transition-colors hover:bg-surface-hover',
+                      isDemo
+                        ? 'border-dashed border-border bg-surface/50'
+                        : 'border-border bg-surface'
                     )}
-                  </div>
-                  <div className="flex flex-none items-center gap-2">
-                    {isProbablyPlayable(stream) ? (
-                      <Badge variant="warning">P2P</Badge>
-                    ) : (
-                      <Badge variant="success">Playable</Badge>
-                    )}
-                    {stream.quality && <Badge variant="primary">{stream.quality}</Badge>}
-                  </div>
-                </button>
-              ))}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-text">
+                        {isDemo
+                          ? demoTitle
+                          : stream.title || stream.behaviorHints?.bingeGroup || `Source ${i + 1}`}
+                      </p>
+                      {stream.behaviorHints?.filename && (
+                        <p className="truncate text-xs text-text-muted">
+                          {stream.behaviorHints.filename}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-none items-center gap-2">
+                      {isDemo ? (
+                        <Badge variant="default">Test</Badge>
+                      ) : isProbablyPlayable(stream) ? (
+                        <Badge variant="success">Playable</Badge>
+                      ) : (
+                        <Badge variant="warning">P2P</Badge>
+                      )}
+                      {stream.quality && !isDemo && (
+                        <Badge variant="primary">{stream.quality}</Badge>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </section>
@@ -426,32 +438,50 @@ export function DetailPage() {
           </section>
         )}
 
-        {/* Trailers */}
+        {/* Trailers — plays in-app from the TMDB videos endpoint */}
         {videos.length > 0 && (
           <section className="mt-8">
             <h2 className="mb-3 text-lg font-semibold text-text">{t('trailers')}</h2>
-            <div className="rail gap-3 pb-2">
-              {videos.slice(0, 6).map((v) => (
-                <a
-                  key={v.id}
-                  href={`https://www.youtube.com/watch?v=${v.key}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rail-item w-56 flex-none"
-                >
-                  <div className="flex aspect-video items-center justify-center rounded-lg bg-black">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" className="text-white/80">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                  </div>
-                  <p className="mt-2 truncate text-xs text-text-muted">{v.name}</p>
-                </a>
-              ))}
+            <div className="rail rail-bleed gap-2.5 pb-2">
+              {videos.slice(0, 8).map((v) => {
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => setTrailer(videos.indexOf(v))}
+                    className="rail-item w-56 flex-none text-left"
+                  >
+                    <div className="flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-black">
+                      {v.key ? (
+                        <img
+                          src={`https://i.ytimg.com/vi/${v.key}/mqdefault.jpg`}
+                          alt=""
+                          loading="lazy"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : null}
+                      <span className="absolute flex h-11 w-11 items-center justify-center rounded-full bg-black/60">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+                          <path d="M6 4l14 8-14 8V4z" />
+                        </svg>
+                      </span>
+                    </div>
+                    <p className="mt-1.5 truncate text-xs text-text-muted">{v.name}</p>
+                    <p className="text-[10px] uppercase tracking-wide text-text-muted/70">{v.type}</p>
+                  </button>
+                );
+              })}
             </div>
           </section>
         )}
       </div>
 
+      {trailer !== null && (
+        <TrailerModal
+          videos={videos}
+          onBack={() => setTrailer(null)}
+          onClose={() => setTrailer(null)}
+        />
+      )}
       {player && (
         <PlayerModal
           stream={player}

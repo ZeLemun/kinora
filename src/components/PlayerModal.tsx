@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScreenOrientation } from '@capacitor/screen-orientation';
+import { StatusBar } from '@capacitor/status-bar';
 import { Capacitor } from '@capacitor/core';
+import { immersive } from '../services/immersive';
 import type { Stream, Subtitle } from '../addon-types';
 
 interface PlayerModalProps {
@@ -70,20 +72,37 @@ export function PlayerModal({
 
   const hasUrl = typeof stream.url === 'string' && /^https?:\/\//i.test(stream.url);
 
-  // Watching always means landscape; restore the device default on exit.
+  // Watching always means landscape, full screen, no system bars.
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     let locked = false;
+
     ScreenOrientation.lock({ orientation: 'landscape' })
       .then(() => {
         locked = true;
       })
       .catch(() => undefined);
-    return () => {
-      if (!locked) return;
-      ScreenOrientation.unlock().catch(() => undefined);
+    StatusBar.hide().catch(() => undefined);
+    void immersive.enter();
+    // Some WebViews honour this as immersive mode too.
+    document.documentElement.requestFullscreen?.().catch(() => undefined);
+
+    // Bars come back after a transient swipe; hide them again once chrome returns.
+    const onVisibility = () => {
+      if (chrome) void immersive.reapply();
     };
-  }, []);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onVisibility);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onVisibility);
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
+      void immersive.exit();
+      StatusBar.show().catch(() => undefined);
+      if (locked) ScreenOrientation.unlock().catch(() => undefined);
+    };
+  }, [chrome]);
 
   useEffect(() => setTracks(subtitles), [subtitles]);
 
@@ -159,14 +178,37 @@ export function PlayerModal({
     bumpChrome();
   }, [bumpChrome]);
 
+  /**
+   * Jump by `delta` seconds. Resumes playback when the clip had ended, and
+   * refuses to run before metadata is known — otherwise currentTime is NaN and
+   * the browser jumps to 0 or to the end instead of seeking.
+   */
+  const skipBy = useCallback((delta: number) => {
+    const video = videoRef.current;
+    if (!video || !Number.isFinite(video.duration) || video.duration <= 0) return;
+    const target = Math.max(0, Math.min(video.duration - 0.25, video.currentTime + delta));
+    video.currentTime = target;
+    setCurrent(target);
+    if (video.ended || video.paused) {
+      void video.play().catch(() => undefined);
+      setPaused(false);
+    }
+    bumpChrome();
+  }, [bumpChrome]);
+
   const toggleFullscreen = useCallback(() => {
+    if (Capacitor.isNativePlatform()) {
+      // Native immersive mode also drops the gesture/nav bar.
+      void immersive.enter();
+      return;
+    }
     if (document.fullscreenElement) void document.exitFullscreen();
     else void document.documentElement.requestFullscreen?.().catch(() => undefined);
   }, []);
 
   const seekTo = (seconds: number) => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !Number.isFinite(seconds)) return;
     video.currentTime = Math.max(0, Math.min(video.duration || 0, seconds));
     setCurrent(video.currentTime);
   };
@@ -454,22 +496,24 @@ export function PlayerModal({
           </button>
 
           <button
-            onClick={() => seekTo(current - 10)}
+            onClick={() => skipBy(-10)}
             aria-label="Back 10 seconds"
-            className="hidden sm:block"
+            className="flex flex-none items-center gap-1 text-xs font-medium text-white/80 transition-colors hover:text-white"
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M11 5L7 9l4 4M7 9h7a6 6 0 110 12" />
             </svg>
+            <span className="hidden sm:inline">10</span>
           </button>
           <button
-            onClick={() => seekTo(current + 10)}
+            onClick={() => skipBy(10)}
             aria-label="Forward 10 seconds"
-            className="hidden sm:block"
+            className="flex flex-none items-center gap-1 text-xs font-medium text-white/80 transition-colors hover:text-white"
           >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l4 4-4 4M17 9h-7a6 6 0 100 12" />
             </svg>
+            <span className="hidden sm:inline">10</span>
           </button>
 
           {/* Volume */}
