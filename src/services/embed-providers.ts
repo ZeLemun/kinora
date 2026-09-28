@@ -2,7 +2,10 @@
  * Embed providers — iframe-based players from streaming sites.
  *
  * These are the same providers the "movie site" uses:
- *   vidsrc.to, superembed (multiembed.mov), vidapi.ru, superembed_vip
+ *   vidsrc.to, superembed (multiembed.mov), vidapi (vaplayer.ru)
+ *
+ * `superembed_vip` was removed after checking it: `directstream.php` answers
+ * 404 for every id, so it offered a source that could never work.
  *
  * They return an embed URL that goes in an <iframe>. The actual video
  * plays inside that iframe, bypassing CORS/Referer blocks because the
@@ -41,13 +44,6 @@ export const EMBED_PROVIDERS: EmbedProvider[] = [
     movie: (id) => `https://vaplayer.ru/embed/movie/${id}`,
     tv: (id, s, e) => `https://vaplayer.ru/embed/tv/${id}/${s}/${e}`,
     hasTracks: false,
-  },
-  {
-    id: 'superembed_vip',
-    name: 'SuperEmbed VIP',
-    movie: (id) => `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1`,
-    tv: (id, s, e) => `https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1&s=${s}&e=${e}`,
-    hasTracks: true,
   },
 ];
 

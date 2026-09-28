@@ -66,8 +66,7 @@ export function DetailPage({ type }: { type: MediaType }) {
 
   const isWatchlisted = useIsInWatchlist(String(mediaId));
   const isFavorite = useIsFavorite(String(mediaId));
-  const progress = useProgressFor(String(mediaId));
-  const toggleWatchlist = useAppStore(selectToggleWatchlist);
+  const progress = useProgressFor(String(mediaId));  const toggleWatchlist = useAppStore(selectToggleWatchlist);
   const toggleFavorite = useAppStore(selectToggleFavorite);
 
   const related = useQuery({
@@ -82,6 +81,40 @@ export function DetailPage({ type }: { type: MediaType }) {
   const episodes = useMemo(
     () => seasons.find((s) => s.season === activeSeason)?.episodes ?? [],
     [seasons, activeSeason]
+  );
+
+  /* Embed sources (iframe players: vidsrc, superembed, vidapi, …). Built from
+     the TMDB id, so they exist as soon as `media` does and never need a second
+     request. This must be declared before the early returns below — a hook
+     after a conditional return is React error #310. */
+  const embedSources = useMemo(
+    () => getEmbedSources({ id: mediaId, type: type === 'movie' ? 'movie' : 'tv' }, activeSeason, 1),
+    [mediaId, type, activeSeason]
+  );
+
+  /** Probed direct sources + embed sources, in the order the chooser offers them. */
+  const allSources = useMemo(
+    () => [
+      ...picker.ranked,
+      ...embedSources.map((e) => ({
+        url: e.url,
+        label: e.provider.name,
+        quality: 'HD',
+        kind: 'embed' as const,
+      })),
+    ],
+    [picker.ranked, embedSources]
+  );
+
+  /**
+   * What "Watch Now" can actually open. A provider embed counts: it always
+   * loads a frame. Only a *failed direct file* disqualifies a source, which is
+   * why this is not simply `playable.length > 0` — that expression used to be
+   * false for most titles, which styled Watch Now as secondary even though the
+   * embeds below it were perfectly good.
+   */
+  const playable = picker.ranked.filter(
+    (s) => s.kind === 'embed' || probes[s.url]?.state !== 'failed'
   );
 
   if (!valid) {
@@ -105,25 +138,6 @@ export function DetailPage({ type }: { type: MediaType }) {
     progress && progress.time > 5 && progress.time < progress.duration - 10
       ? `${Math.floor(progress.time / 60)}:${String(Math.floor(progress.time % 60)).padStart(2, '0')}`
       : null;
-
-  /** Embed sources (iframe embeds from vidsrc, superembed, vidapi, etc.). */
-  const embedSources = useMemo(
-    () => getEmbedSources({ id: mediaId, type: type === 'movie' ? 'movie' : 'tv' }, activeSeason, 1),
-    [mediaId, type, activeSeason]
-  );
-
-  /** Probed sources + embed sources for the UI. */
-  const allSources = useMemo(() => [...picker.ranked, ...embedSources.map((e) => ({
-    url: e.url,
-    label: e.provider.name,
-    quality: 'HD',
-    kind: 'embed' as const,
-  }))], [picker.ranked, embedSources]);
-
-  /** Sources that survived a health check; drives whether Watch Now is primary. */
-  const playable = picker.ranked.filter(
-    (s) => s.kind === 'free' && probes[s.url]?.state !== 'failed'
-  );
 
   const back = () => {
     if (window.history.length > 1) navigate(-1);
@@ -330,17 +344,21 @@ export function DetailPage({ type }: { type: MediaType }) {
                 return (
                   <li key={s.url}>
                     {isEmbed ? (
-                      <button
-                        onClick={() => window.open(s.url, '_blank', 'noopener,noreferrer')}
-                        aria-disabled={false}
-                        className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors hover:bg-elevated border border-dashed border-line"
+                      /* Embeds play in the in-app player, not a browser tab:
+                         the frame needs immersive/landscape, a source chooser and
+                         a back action, none of which an external tab provides. */
+                      <Link
+                        to={`/player/${media.id}?src=${encodeURIComponent(s.url)}${
+                          type === 'series' ? `&season=${activeSeason}&episode=1` : ''
+                        }`}
+                        className="flex items-center gap-2.5 rounded-lg border border-dashed border-line px-2.5 py-2 text-sm transition-colors hover:bg-elevated"
                       >
                         <span className="badge badge-default flex-none">Embed</span>
                         <span className="min-w-0 flex-1 truncate text-text-secondary">{s.label}</span>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="flex-none text-text-muted" aria-hidden>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7-7 7" />
                         </svg>
-                      </button>
+                      </Link>
                     ) : (
                       <Link
                         to={`/player/${media.id}?src=${encodeURIComponent(s.url)}${
@@ -460,7 +478,7 @@ export function DetailPage({ type }: { type: MediaType }) {
                     media={media}
                     episode={ep}
                     activeSeason={activeSeason}
-                    progress={useProgressFor(String(media.id))}
+                    progress={progress}
                   />
                 ))}
               </ul>

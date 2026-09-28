@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { loadMovie, loadSeries } from '../services/catalog';
-import { mergeSources, trailerSource, useArchiveSources } from '../services/sources';
+import { trailerSource, useArchiveSources } from '../services/sources';
+import { getEmbedSources } from '../services/embed-providers';
 import { VideoPlayer } from '../components/VideoPlayer';
+import { EmbedPlayer } from '../components/EmbedPlayer';
 import { SourceChooser } from '../components/SourceChooser';
 import { TrailerModal } from '../components/TrailerModal';
 import { EmptyState } from '../components/ui';
@@ -83,8 +85,37 @@ export function PlayerPage() {
     return () => clearTimeout(id);
   }, [archiveDone]);
 
+  /**
+   * Embed providers are first-class sources here, not an external link.
+   *
+   * This was the actual bug behind "Watch Now only opens the trailer": the
+   * player built its list from the archive and the trailer alone, so for any
+   * modern film the trailer was the only thing it had. The providers are keyed
+   * on the TMDB id and need no request, so they are available the moment
+   * `media` lands.
+   */
+  const embedSources: MediaSource[] = useMemo(() => {
+    if (!media) return [];
+    return getEmbedSources(
+      { id: mediaId, type: isSeriesUrl ? 'tv' : 'movie' },
+      isSeriesUrl ? Number(season) || 1 : 1,
+      episode
+    ).map(({ url, provider }) => ({
+      url,
+      label: provider.name,
+      quality: 'HD',
+      kind: 'embed' as const,
+    }));
+  }, [media, mediaId, isSeriesUrl, season, episode]);
+
   const list: MediaSource[] = useMemo(() => {
-    const all = mergeSources(archive.data ?? [], trailer);
+    // A verified file beats any embed; among embeds the providers come first and
+    // the trailer is the last resort, not the first thing that plays.
+    const all = [
+      ...(archive.data ?? []),
+      ...embedSources,
+      ...(trailer ? [trailer] : []),
+    ];
     if (!srcParam) return all;
     const chosen = all.find((s) => s.url === srcParam);
     if (chosen) return [chosen, ...all.filter((s) => s.url !== srcParam)];
@@ -93,7 +124,7 @@ export function PlayerPage() {
       { url: srcParam, label: 'Selected source', quality: 'HD', kind: 'free' as const },
       ...all,
     ];
-  }, [archive.data, trailer, srcParam]);
+  }, [archive.data, embedSources, trailer, srcParam]);
 
   /**
    * Once playback has a source it keeps that one. The archive list can arrive
@@ -285,13 +316,50 @@ export function PlayerPage() {
     navigate(backTo());
   };
 
-  /* A trailer is a YouTube embed, not a video file. */
+  /**
+   * An `embed` is a web page, not a video file.
+   *
+   * Two very different things arrive here. The official trailer is a YouTube
+   * frame, which has a known id and is worth the richer modal. A provider frame
+   * is an opaque document that runs its own player, so it gets the full-bleed
+   * embed player and a source chooser.
+   *
+   * They must be told apart by host, not by pattern: `vidsrc.to/embed/movie/550`
+   * matches `/embed/(\w+)/` and would yield the string "movie".
+   */
   if (isEmbed) {
+    const isYouTube = /(^|\.)youtube(-nocookie)?\.com|youtu\.be/i.test(source.url);
+    const youtubeKey = isYouTube
+      ? source.url.match(/(?:embed\/|v=|youtu\.be\/)([\w-]{6,})/)?.[1]
+      : undefined;
+
+    if (youtubeKey) {
+      return <TrailerModal videoKey={youtubeKey} onClose={exit} />;
+    }
+
     return (
-      <TrailerModal
-        videoKey={source.url.match(/embed\/([\w-]+)/)?.[1] ?? ''}
-        onClose={exit}
-      />
+      <div className="relative h-full w-full bg-black">
+        {chooserOpen && picker.ranked.length > 1 ? (
+          <div className="absolute inset-x-0 bottom-0 z-30 flex justify-center p-3 pb-4">
+            <SourceChooser
+              sources={picker.ranked}
+              probes={probes}
+              activeUrl={source.url}
+              checking={false}
+              onPick={chooseSource}
+              onClose={() => setChooserOpen(false)}
+            />
+          </div>
+        ) : null}
+
+        <EmbedPlayer
+          key={source.url}
+          src={source.url}
+          title={`${title} · ${source.label}`}
+          onExit={exit}
+          onSwitchSource={() => setChooserOpen(true)}
+        />
+      </div>
     );
   }
 
