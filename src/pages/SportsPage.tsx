@@ -8,6 +8,7 @@ import {
   type League,
   type Match,
 } from '../services/sports';
+import { fmtMatchLength, useFullMatches } from '../services/fifa-plus';
 import { EmptyState, Skeleton, useToast } from '../components/ui';
 import { cn } from '../utils/cn';
 
@@ -93,6 +94,8 @@ export function SportsPage() {
           </div>
         </section>
       ) : null}
+
+      <FullMatches />
 
       {/* League picker */}
       <div className="sticky top-0 z-30 border-y border-line bg-background/90 py-2.5 backdrop-blur-xl">
@@ -184,10 +187,119 @@ export function SportsPage() {
       </div>
 
       <p className="mt-10 px-4 text-center text-xs text-text-muted sm:px-6 lg:px-10">
-        Live scores and fixtures from ESPN · tables from TheSportsDB. Kick-off times are in your
-        local timezone.
+        Live scores and fixtures from ESPN · tables from TheSportsDB · full matches from FIFA+.
+        Kick-off times are in your local timezone.
       </p>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * Complete matches, from FIFA+.
+ *
+ * Sits above the league picker on purpose. "Watch live" on a scoreboard leads
+ * to a broadcaster page and, from there, quite often to a highlights package
+ * standing in for the match. This section exists so that wanting to watch a
+ * full match has a direct answer that cannot be a clip: the filter in
+ * `fifa-plus.ts` drops anything without "Full Match" in the title and anything
+ * whose title reads like a highlights package.
+ *
+ * Scope, stated plainly: international football only — World Cup, qualifiers,
+ * women's, youth, beach — and mostly 2022-23 vintage. Domestic league rights
+ * are paid and this does not change that.
+ */
+function FullMatches() {
+  const { data, isLoading } = useFullMatches();
+  const matches = data ?? [];
+  const [expanded, setExpanded] = useState(false);
+
+  const shown = expanded ? matches : matches.slice(0, 6);
+
+  if (isLoading) {
+    return (
+      <section className="px-4 pb-7 sm:px-6 lg:px-10">
+        <Skeleton className="mb-3 h-5 w-44" />
+        <div className="rail rail-bleed fade-edges">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-40 w-56 flex-none rounded-xl" />
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (matches.length === 0) return null;
+
+  return (
+    <section className="px-4 pb-7 sm:px-6 lg:px-10">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
+        <h2 className="text-base font-semibold text-text">Watch a full match</h2>
+        <span className="badge badge-success">Full match</span>
+      </div>
+      <p className="mb-3 text-xs text-text-muted">
+        Complete games, not highlights. Free on FIFA+ — no account.
+      </p>
+
+      <div className="rail rail-bleed fade-edges">
+        {shown.map((m) => (
+          <a
+            key={m.id}
+            href={m.url}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="card card-hover group relative flex w-56 flex-none flex-col overflow-hidden"
+          >
+            <div className="relative aspect-video w-full overflow-hidden bg-card">
+              {m.thumbnail ? (
+                <img
+                  src={m.thumbnail}
+                  alt=""
+                  loading="lazy"
+                  className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                />
+              ) : null}
+              <span className="absolute inset-0 flex items-center justify-center bg-black/35">
+                <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/55 backdrop-blur-sm">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="white" aria-hidden>
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                </span>
+              </span>
+              {/* The guarantee this section makes, stated on the card. */}
+              <span className="badge badge-success absolute left-2 top-2">FULL</span>
+              {m.durationSeconds ? (
+                <span className="absolute bottom-2 right-2 rounded bg-black/75 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                  {fmtMatchLength(m.durationSeconds)}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="min-w-0 flex-1 p-2.5">
+              <p className="truncate text-sm font-semibold text-text">{m.teams}</p>
+              {m.competition ? (
+                <p className="mt-0.5 truncate text-[11px] text-text-muted">{m.competition}</p>
+              ) : null}
+              {m.date ? (
+                <p className="mt-0.5 truncate text-[11px] text-text-muted">
+                  {new Date(m.date).getFullYear()}
+                </p>
+              ) : null}
+            </div>
+          </a>
+        ))}
+      </div>
+
+      {matches.length > 6 ? (
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-3 text-xs font-medium text-text-secondary transition-colors hover:text-text"
+        >
+          {expanded ? 'Show less' : `Show all ${matches.length} matches`}
+        </button>
+      ) : null}
+    </section>
   );
 }
 
@@ -258,7 +370,9 @@ function WhereToWatch({ league }: { league: League }) {
       </div>
       <p className="mt-2 text-[11px] leading-relaxed text-text-muted">
         Broadcast rights are territorial, so which service carries a match depends on where you
-        are. These links go to the official pages.
+        are — and most need a subscription. These links go to the official pages, which may offer
+        highlights rather than the full game. For a guaranteed complete match, use the full-match
+        row above.
       </p>
     </section>
   );
@@ -444,7 +558,10 @@ function MatchCard({
           <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
             <path d="M8 5v14l11-7z" />
           </svg>
-          Watch live
+          {/* Not "Watch live". The broadcaster page may well be a highlights
+              package or a paywall depending on the territory, and promising
+              a stream here is how you get a 4-minute clip when you wanted 90. */}
+          Where to watch this match
         </ExternalLink>
       ) : null}
 
