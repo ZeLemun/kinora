@@ -73,6 +73,8 @@ export function PlayerModal({
   const hasUrl = typeof stream.url === 'string' && /^https?:\/\//i.test(stream.url);
 
   // Watching always means landscape, full screen, no system bars.
+  // This must run ONCE for the whole player: re-running it unlocks and
+  // re-locks the orientation, which makes the video visibly stutter.
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     let locked = false;
@@ -84,23 +86,25 @@ export function PlayerModal({
       .catch(() => undefined);
     StatusBar.hide().catch(() => undefined);
     void immersive.enter();
-    // Some WebViews honour this as immersive mode too.
     document.documentElement.requestFullscreen?.().catch(() => undefined);
 
-    // Bars come back after a transient swipe; hide them again once chrome returns.
-    const onVisibility = () => {
-      if (chrome) void immersive.reapply();
-    };
-    document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('focus', onVisibility);
-
     return () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('focus', onVisibility);
       if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
       void immersive.exit();
       StatusBar.show().catch(() => undefined);
       if (locked) ScreenOrientation.unlock().catch(() => undefined);
+    };
+  }, []);
+
+  // Re-hide the bars after a transient swipe, without touching orientation.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || !chrome) return;
+    const onFocus = () => void immersive.reapply();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
     };
   }, [chrome]);
 
@@ -606,11 +610,7 @@ export function PlayerModal({
               </div>
             )}
 
-            <button onClick={toggleFullscreen} aria-label="Fullscreen">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
-              </svg>
-            </button>
+            {/* No fullscreen toggle: the player is already immersive. */}
           </div>
         </div>
       </div>
