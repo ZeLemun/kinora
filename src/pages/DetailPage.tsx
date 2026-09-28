@@ -5,6 +5,7 @@ import { loadMovie, loadSeries, similar } from '../services/catalog';
 import { mergeSources, trailerSource, useArchiveSources } from '../services/sources';
 import { useOmdbRatings } from '../services/omdb';
 import { useSourcePicker } from '../hooks/useSourcePicker';
+import { getEmbedSources } from '../services/embed-providers';
 import { MediaRow } from '../components/MediaRow';
 import { TrailerModal } from '../components/TrailerModal';
 import { EmptyState, SkeletonDetail, useToast } from '../components/ui';
@@ -51,11 +52,11 @@ export function DetailPage({ type }: { type: MediaType }) {
   /* Sources. The archive lookup runs in the background; the trailer is
      derived from the detail response and is therefore available immediately. */
   const archive = useArchiveSources(media);
-  const list = useMemo(
+  const mergedSources = useMemo(
     () => mergeSources(archive.data ?? [], trailerSource(media)),
     [archive.data, media]
   );
-  const picker = useSourcePicker(list, true);
+  const picker = useSourcePicker(mergedSources, true);
   const { probes } = picker;
 
   const [season, setSeason] = useState<number | null>(null);
@@ -102,6 +103,20 @@ export function DetailPage({ type }: { type: MediaType }) {
     progress && progress.time > 5 && progress.time < progress.duration - 10
       ? `${Math.floor(progress.time / 60)}:${String(Math.floor(progress.time % 60)).padStart(2, '0')}`
       : null;
+
+  /** Embed sources (iframe embeds from vidsrc, superembed, vidapi, etc.). */
+  const embedSources = useMemo(
+    () => getEmbedSources({ id: mediaId, type: type === 'movie' ? 'movie' : 'tv' }, activeSeason, 1),
+    [mediaId, type, activeSeason]
+  );
+
+  /** Probed sources + embed sources for the UI. */
+  const allSources = useMemo(() => [...picker.ranked, ...embedSources.map((e) => ({
+    url: e.url,
+    label: e.provider.name,
+    quality: 'HD',
+    kind: 'embed' as const,
+  }))], [picker.ranked, embedSources]);
 
   /** Sources that survived a health check; drives whether Watch Now is primary. */
   const playable = picker.ranked.filter(
@@ -301,41 +316,54 @@ export function DetailPage({ type }: { type: MediaType }) {
         </div>
 
         {/* Sources */}
-        {list.length > 0 ? (
+        {allSources.length > 0 ? (
           <div className="mt-5 rounded-xl border border-line bg-card p-3.5">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
               Available sources
             </h3>
             <ul className="mt-2.5 space-y-1.5">
-              {picker.ranked.map((s) => {
-                const dead = s.kind === 'free' && probes[s.url]?.state === 'failed';
+              {allSources.map((s) => {
+                const isEmbed = s.kind === 'embed';
+                const dead = !isEmbed && probes[s.url]?.state === 'failed';
                 return (
                   <li key={s.url}>
-                    <Link
-                      to={`/player/${media.id}?src=${encodeURIComponent(s.url)}${
-                        type === 'series' ? `&season=${activeSeason}&episode=1` : ''
-                      }`}
-                      aria-disabled={dead}
-                      onClick={(e) => dead && e.preventDefault()}
-                      className={cn(
-                        'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors',
-                        dead
-                          ? 'opacity-45'
-                          : s.kind === 'embed'
-                            ? 'border border-dashed border-line hover:bg-elevated'
-                            : 'hover:bg-elevated'
-                      )}
-                    >
-                      <span
+                    {isEmbed ? (
+                      <button
+                        onClick={() => window.open(s.url, '_blank', 'noopener,noreferrer')}
+                        aria-disabled={false}
+                        className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors hover:bg-elevated border border-dashed border-line"
+                      >
+                        <span className="badge badge-default flex-none">Embed</span>
+                        <span className="min-w-0 flex-1 truncate text-text-secondary">{s.label}</span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="flex-none text-text-muted" aria-hidden>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7-7 7" />
+                        </svg>
+                      </button>
+                    ) : (
+                      <Link
+                        to={`/player/${media.id}?src=${encodeURIComponent(s.url)}${
+                          type === 'series' ? `&season=${activeSeason}&episode=1` : ''
+                        }`}
+                        aria-disabled={dead}
+                        onClick={(e) => dead && e.preventDefault()}
                         className={cn(
-                          'badge flex-none',
-                          s.kind === 'embed' ? 'badge-default' : dead ? 'badge-danger' : 'badge-success'
+                          'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors',
+                          dead
+                            ? 'opacity-45'
+                            : 'hover:bg-elevated'
                         )}
                       >
-                        {s.kind === 'embed' ? 'Trailer' : dead ? 'Failed' : s.quality ?? 'HD'}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-text-secondary">{s.label}</span>
-                    </Link>
+                        <span
+                          className={cn(
+                            'badge flex-none',
+                            dead ? 'badge-danger' : 'badge-success'
+                          )}
+                        >
+                          {dead ? 'Failed' : s.quality ?? 'HD'}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-text-secondary">{s.label}</span>
+                      </Link>
+                    )}
                   </li>
                 );
               })}

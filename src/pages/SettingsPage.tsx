@@ -106,6 +106,37 @@ export function SettingsPage() {
           </Row>
         </Section>
 
+        {/* Streaming Sources */}
+        <Section title="Streaming Sources">
+          <Row label="HLS Proxy URL">
+            <input
+              type="text"
+              value={settings.hlsProxyUrl}
+              onChange={(e) => updateSettings({ hlsProxyUrl: e.target.value })}
+              placeholder="http://192.168.1.50:3001"
+              aria-label="HLS proxy base URL"
+              className="input h-9 flex-1 text-xs"
+            />
+            <span className="text-[11px] text-text-muted ml-2 shrink-0">
+              Run hls-proxy.js on your PC; put its LAN IP here.
+            </span>
+          </Row>
+
+          <Row label="RapidAPI Key (Sports)">
+            <input
+              type="password"
+              value={settings.rapidApiKey}
+              onChange={(e) => updateSettings({ rapidApiKey: e.target.value })}
+              placeholder="Get free key at rapidapi.com"
+              aria-label="RapidAPI key for 1xAPI football streams"
+              className="input h-9 flex-1 text-xs"
+            />
+            <span className="text-[11px] text-text-muted ml-2 shrink-0">
+              Free 50 req/day at rapidapi.com/1xapi-rapid-team/api/football-live-streaming-api
+            </span>
+          </Row>
+        </Section>
+
         {/* Notifications */}
         <Section title="Notifications">
           <Toggle

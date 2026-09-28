@@ -103,6 +103,10 @@ export interface Settings {
   defaultSubtitleLang: string;
   newContentNotifications: boolean;
   continueWatchingReminders: boolean;
+  /** Base URL of the HLS proxy (e.g. http://192.168.1.50:3001). */
+  hlsProxyUrl: string;
+  /** RapidAPI key for 1xAPI sports streams. */
+  rapidApiKey: string;
 }
 
 interface AppState {
@@ -135,6 +139,8 @@ const defaultSettings: Settings = {
   defaultSubtitleLang: 'en',
   newContentNotifications: false,
   continueWatchingReminders: false,
+  hlsProxyUrl: '',
+  rapidApiKey: '',
 };
 
 const EMPTY = { progress: {}, watchlist: [], favorites: [], history: [], settings: defaultSettings };
