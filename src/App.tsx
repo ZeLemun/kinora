@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { Sidebar, BottomNav } from './components/Shell';
 import { MiniPlayer } from './components/MiniPlayer';
 import { ToastProvider } from './components/ui';
@@ -60,7 +60,11 @@ function Shell() {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/discover" element={<DiscoverPage />} />
-            <Route path="/movies" element={<CatalogPage type="movie" />} />
+            {/* The Movies tab was removed in favour of Discover, but the URL
+                is kept alive as a redirect so old links and bookmarks land on
+                the equivalent listing instead of silently falling through to
+                the home page. */}
+            <Route path="/movies" element={<Navigate to="/discover?type=movie" replace />} />
             <Route path="/series" element={<CatalogPage type="series" />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/library" element={<LibraryPage />} />

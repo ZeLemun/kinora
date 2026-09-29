@@ -12,7 +12,7 @@ const ROWS: { key: RowKey; title: string; to: string }[] = [
   { key: 'trending', title: 'Trending This Week', to: '/discover?sort=trending' },
   { key: 'nowPlaying', title: 'In Cinemas', to: '/discover?type=movie&sort=nowPlaying' },
   { key: 'popularSeries', title: 'Popular Series', to: '/series' },
-  { key: 'popularMovies', title: 'Popular Movies', to: '/movies' },
+  { key: 'popularMovies', title: 'Popular Movies', to: '/discover?type=movie&sort=popularMovies' },
   { key: 'topRatedMovies', title: 'Top Rated Movies', to: '/discover?type=movie&sort=topRatedMovies' },
   { key: 'topRatedSeries', title: 'Critically Acclaimed', to: '/discover?type=series&sort=topRatedSeries' },
   { key: 'upcomingMovies', title: 'Coming Soon', to: '/discover?type=movie&sort=upcomingMovies' },
