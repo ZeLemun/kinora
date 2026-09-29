@@ -51,13 +51,16 @@ export interface EmbedProvider {
  */
 export const EMBED_PROVIDERS: EmbedProvider[] = [
   {
-    id: 'vidsrc',
-    name: 'VidSrc',
-    movie: (id) => `https://vidsrc.to/embed/movie/${id}`,
-    tv: (id, s, e) => `https://vidsrc.to/embed/tv/${id}/${s}/${e}`,
-    hasTracks: true,
-  },
-  {
+    /*
+     * First by preference, not by hope.
+     *
+     * VidCore is the one that reliably produced a <video> while testing: it
+     * resolved a source for titles where vidsrc answered "This media is
+     * unavailable", and it documents its own autoplay flag. VidSrc's chain
+     * (vidsrc.to -> vsembed.ru -> a third host) is the one that most often
+     * resolved to nothing, so it is demoted rather than removed — it still wins
+     * on titles the others miss.
+     */
     id: 'vidcore',
     name: 'VidCore',
     movie: (id) => `https://vidcore.org/embed/movie/${id}`,
@@ -65,6 +68,13 @@ export const EMBED_PROVIDERS: EmbedProvider[] = [
     hasTracks: true,
     // Documented by the provider itself as `?autoplay=true`.
     autoplay: 'autoplay=true',
+  },
+  {
+    id: 'vidsrc',
+    name: 'VidSrc',
+    movie: (id) => `https://vidsrc.to/embed/movie/${id}`,
+    tv: (id, s, e) => `https://vidsrc.to/embed/tv/${id}/${s}/${e}`,
+    hasTracks: true,
   },
   {
     id: 'superembed',

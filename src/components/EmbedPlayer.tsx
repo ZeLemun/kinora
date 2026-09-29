@@ -3,6 +3,15 @@ import { immersive } from '../services/immersive';
 import { withAutoplay } from '../services/embed-providers';
 
 /**
+ * How long a provider frame gets to report a load before the next one is tried.
+ *
+ * Comfortably longer than a working provider needs — a cold iframe on this
+ * connection settled in a couple of seconds — while still being short enough
+ * that a dead source does not feel like a hang.
+ */
+const STALL_MS = 9000;
+
+/**
  * Plays an `embed` source: a whole web page in an <iframe>.
  *
  * A trailer is one of these (YouTube), and so is a provider page that runs its
@@ -28,6 +37,7 @@ export function EmbedPlayer({
   title,
   providerName,
   providerId,
+  onSourceFailed,
   onExit,
   onSwitchSource,
 }: {
@@ -38,6 +48,8 @@ export function EmbedPlayer({
   providerName?: string;
   /** Used to look up the provider's autoplay flag. */
   providerId?: string;
+  /** Called when this source is judged unusable, so the page can try the next. */
+  onSourceFailed?: () => void;
   onExit: () => void;
   onSwitchSource?: () => void;
 }) {
@@ -80,6 +92,38 @@ export function EmbedPlayer({
     setLoading(true);
   }, [reloadKey, src]);
 
+  /**
+   * Automatic fallback, on the failures the app can actually see.
+   *
+   * A provider that answers "This media is unavailable" loads a perfectly valid
+   * HTTP 200 page, so neither a load error nor a missing document fires — the
+   * frame is healthy and the content is empty. The app cannot read inside it:
+   * it is cross-origin, so its text, its <video> and its nested frames are all
+   * closed off.
+   *
+   * What is left is a watchdog. If the frame has not reported a load within
+   * STALL_MS, the next source is tried. A working provider settles in well
+   * under that; a hung one never does.
+   *
+   * Deliberately not cleverer than that. Guessing at playback from outside the
+   * frame means switching away from providers that are merely slow, and the
+   * source chooser is always one tap away.
+   */
+  const settled = useRef(false);
+  const onFailRef = useRef(onSourceFailed);
+  onFailRef.current = onSourceFailed;
+
+  useEffect(() => {
+    settled.current = false;
+
+    const watchdog = setTimeout(() => {
+      if (!settled.current) onFailRef.current?.();
+    }, STALL_MS);
+
+    return () => clearTimeout(watchdog);
+    // Re-runs per source, which is the point: each attempt gets its own budget.
+  }, [src, reloadKey]);
+
   /* The bar hides while the film is being watched and comes back on a tap near
      the top edge. It is not a full-screen tap target: the provider's own
      controls live under this frame, and a screen-wide catcher would eat every
@@ -104,7 +148,10 @@ export function EmbedPlayer({
            identical from here: a player sitting on its poster. */
         src={providerId ? withAutoplay(src, providerId) : src}
         title={title}
-        onLoad={() => setLoading(false)}
+        onLoad={() => {
+          settled.current = true;
+          setLoading(false);
+        }}
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
         allowFullScreen
         referrerPolicy="origin"

@@ -58,6 +58,8 @@ export function DetailPage({ type }: { type: MediaType }) {
     () => mergeSources(archive.data ?? [], trailerSource(media)),
     [archive.data, media]
   );
+  /** The official trailer's URL, if this title has one. Used to sort it last. */
+  const trailerUrl = trailerSource(media)?.url;
   const picker = useSourcePicker(mergedSources, true);
   const { probes } = picker;
 
@@ -97,19 +99,25 @@ export function DetailPage({ type }: { type: MediaType }) {
     [mediaId, type, activeSeason]
   );
 
-  /** Probed direct sources + embed sources, in the order the chooser offers them. */
-  const allSources = useMemo(
-    () => [
-      ...picker.ranked,
-      ...embedSources.map((e) => ({
-        url: e.url,
-        label: e.provider.name,
-        quality: 'HD',
-        kind: 'embed' as const,
-      })),
-    ],
-    [picker.ranked, embedSources]
-  );
+  /**
+   * Everything playable, in the same order the player would use it.
+   *
+   * `picker.ranked` covers the archive files and the trailer, so appending the
+   * providers to it listed the *trailer first* — the exact thing this page is
+   * supposed to steer away from. The order is rebuilt here rather than
+   * concatenated: direct files, then providers in preference order, trailer last.
+   */
+  const allSources = useMemo(() => {
+    const direct = picker.ranked.filter((s) => s.kind === 'free');
+    const trailer = picker.ranked.filter((s) => s.url === trailerUrl);
+    const providers = embedSources.map((e) => ({
+      url: e.url,
+      label: e.provider.name,
+      quality: 'HD',
+      kind: 'embed' as const,
+    }));
+    return [...direct, ...providers, ...trailer];
+  }, [picker.ranked, embedSources, trailerUrl]);
 
   /**
    * What "Watch Now" can actually open. A provider embed counts: it always
