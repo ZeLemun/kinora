@@ -10,21 +10,30 @@ import Capacitor
  out into Safari to an advert. That took three attempts to close on Android and
  both failure paths exist here too.
 
- Two paths, both closed:
+ ## It extends, it does not replace
 
- 1. A top-level navigation to a host outside `allowNavigation`. WKWebView's
-    default is to hand that to the system browser. The list is read through
-    Capacitor's own `shouldAllowNavigation(to:)`, so the two platforms are
-    configured from the single place — `capacitor.config.ts` — and cannot drift.
+ This subclasses Capacitor's own `WebViewDelegationHandler` and calls through to
+ `super` for anything it does not specifically block. That is not a stylistic
+ choice, it is the whole reason the first build came up black.
 
- 2. `target="_blank"` / `window.open()` popups. These never reach the navigation
-    delegate at all, so `WKUIDelegate.createWebViewWith` has to catch them. It
-    cannot tell a link the app rendered from an advert the page opened, so the
-    same explicit allow-list is used, and everything else is dropped.
+ `CAPBridgeViewController` assigns *its* delegate to the web view
+ (`aWebView.navigationDelegate = delegationHandler`), and that delegate is what
+ serves the app's own bundle. Assigning a bare `WKNavigationDelegate` over the
+ top — which is exactly what the first version of this file did — silently
+ removed the app's ability to load itself. A black screen with no crash and
+ nothing in the log.
 
- The plugin class exists so Capacitor has something to register; the delegates
- are installed by `SceneDelegate` because they must be in place before the
- bridge's first load.
+ Two paths are blocked, both of which exist on iOS:
+
+ 1. A top-level navigation to a host outside `allowNavigation`. The list is read
+    through Capacitor's own `shouldAllowNavigation(to:)`, so both platforms are
+    configured from `capacitor.config.ts` and cannot drift apart.
+ 2. `target="_blank"` / `window.open()` popups. Capacitor's default opens *every*
+    one of them in the system browser, which is precisely the ad case.
+
+ The plugin class exists because Capacitor needs something to register; the
+ delegate is installed by `SceneDelegate` because it has to wrap the one
+ Capacitor has already assigned.
  */
 @objc(NavigationGuardPlugin)
 public class NavigationGuardPlugin: CAPPlugin, CAPBridgedPlugin {
@@ -39,17 +48,14 @@ public class NavigationGuardPlugin: CAPPlugin, CAPBridgedPlugin {
      The only hosts allowed to open in the system browser.
 
      Intentionally empty, and that is the point. Every entry here was a
-     sports host, and the sports section has been removed, so nothing in the
-     app links out to a third-party site any more. That makes every popup an
-     advert from inside a provider frame, and dropping all of them is the
-     correct behaviour.
+     sports host and the sports section has been removed, so nothing in the app
+     links out to a third-party site any more. That makes every popup an advert
+     from inside a provider frame, and dropping all of them is correct.
 
      The list stays as a seam: a popup cannot be told apart from a deliberate
      link by URL alone, so "did the app mean to go here" has to be answered by
-     hand. Populating it means adverts may open those hosts in Safari.
-
-     Kept in step with `EXTERNAL_LINK_HOSTS` in the Android MainActivity, which
-     is already empty.
+     hand. Kept in step with `EXTERNAL_LINK_HOSTS` in the Android MainActivity,
+     which is already empty.
      */
     private static let externalLinkHosts: Set<String> = []
 
@@ -63,60 +69,85 @@ public class NavigationGuardPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 }
 
-/// Watches every navigation leaving the web view.
-final class NavigationGuard: NSObject, WKNavigationDelegate {
+/**
+ Wraps Capacitor's delegate rather than replacing it.
 
-    private let config: InstanceConfiguration?
+ Everything this does not explicitly block is handed to `super`, which is what
+ keeps the local bundle, the script message handler and the scroll behaviour
+ working.
+ */
+final class NavigationGuard: WebViewDelegationHandler {
 
-    init(config: InstanceConfiguration?) {
-        self.config = config
+    private let allowList: InstanceConfiguration?
+    /// The exact origin the app boots from, e.g. `kinora://localhost`.
+    private let appOrigin: URL?
+
+    init(allowList: InstanceConfiguration?) {
+        self.allowList = allowList
+        self.appOrigin = allowList?.appStartServerURL
         super.init()
     }
 
-    func webView(
+    /// True for the app's own documents and resources.
+    private func isAppURL(_ url: URL) -> Bool {
+        guard let origin = appOrigin, let scheme = url.scheme else { return false }
+        if url.scheme != origin.scheme { return false }
+        // The custom scheme always serves from localhost; the port is not part
+        // of the identity, so the host is compared rather than the full origin.
+        return url.host == origin.host
+    }
+
+    override func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
         guard let url = navigationAction.request.url else {
-            decisionHandler(.allow)
+            super.webView(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
             return
         }
 
         // data: and blob: are the player's own media plumbing. Blocking them
         // would break playback outright.
-        if url.scheme == "about" || url.scheme == "data" || url.scheme == "blob" {
-            decisionHandler(.allow)
+        if url.scheme == "data" || url.scheme == "blob" {
+            super.webView(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
             return
         }
 
-        if url.host == "localhost" {
-            decisionHandler(.allow)
+        // The app's own origin, whatever scheme capacitor.config.ts gave it.
+        // Getting this wrong is what a black screen looks like.
+        if isAppURL(url) {
+            super.webView(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
             return
         }
 
-        if let host = url.host, config?.shouldAllowNavigation(to: host) == true {
-            decisionHandler(.allow)
+        if url.scheme == "about" {
+            super.webView(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
             return
         }
 
-        // Everything else is an advert or an unlisted host. Dropped silently.
+        if let host = url.host, allowList?.shouldAllowNavigation(to: host) == true {
+            super.webView(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
+            return
+        }
+
+        // An advert, or any host not on the list. Dropped without a dialog.
         decisionHandler(.cancel)
     }
-}
 
-/// Catches popups, which never reach the navigation delegate.
-final class PopupGuard: NSObject, WKUIDelegate {
+    /**
+     Popups never reach the navigation delegate.
 
-    func webView(
+     Capacitor's default opens every one in the system browser, which is the ad
+     case. Only a host the app deliberately links to is offered to the browser;
+     everything else is dropped, which the default return of nil does.
+     */
+    override func webView(
         _ webView: WKWebView,
         createWebViewWith configuration: WKWebViewConfiguration,
         for navigationAction: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-
-        // Returning nil blocks the popup. Before blocking, hand the browser only
-        // a host the app deliberately links to.
         if let url = navigationAction.request.url,
            NavigationGuardPlugin.isDeliberateLink(url) {
             UIApplication.shared.open(url, options: [:], completionHandler: nil)

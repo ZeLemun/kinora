@@ -34,9 +34,20 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // Safari. This is the iOS equivalent of
         // `MainActivity.installNavigationGuards`, which Android also calls
         // before the WebView settles.
+        // Wrap Capacitor's delegate, never replace it.
+        //
+        // CAPBridgeViewController assigns its own WebViewDelegationHandler to
+        // the web view, and that handler is what serves the app's own bundle.
+        // The first version of this assigned a bare WKNavigationDelegate over
+        // the top and the app came up black — no crash, nothing in the log,
+        // just an empty screen because it could no longer load itself.
+        //
+        // uiDelegate is deliberately left alone: Capacitor's handler owns the
+        // script message bridge, and replacing it fails just as silently.
         if let webView = controller.bridgedWebView {
-            webView.navigationDelegate = NavigationGuard(config: controller.bridge?.config)
-            webView.uiDelegate = PopupGuard()
+            webView.navigationDelegate = NavigationGuard(
+                allowList: controller.bridge?.config
+            )
         }
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)
