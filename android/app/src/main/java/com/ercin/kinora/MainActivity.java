@@ -92,15 +92,20 @@ public class MainActivity extends BridgeActivity {
                     boolean isUserGesture,
                     android.os.Message resultMsg
                 ) {
-                    // A deliberate target="_blank" link from the app. The URL
-                    // only exists on a transport WebView, so one is created,
-                    // used to read it, and thrown away.
+                    // A popup. The URL only exists on a transport WebView, so
+                    // one is created, used to read it, and thrown away.
                     final WebView probe = new WebView(MainActivity.this);
                     probe.setWebViewClient(
                         new WebViewClient() {
                             @Override
                             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
-                                openExternally(req.getUrl());
+                                Uri target = req.getUrl();
+                                // Only a host the app deliberately links out to
+                                // is allowed to leave. An advert inside a
+                                // provider frame is a popup too, and opening
+                                // those is what threw the viewer out to Chrome
+                                // when play was pressed.
+                                if (isDeliberateLink(target)) openExternally(target);
                                 return true;
                             }
                         }
@@ -130,6 +135,49 @@ public class MainActivity extends BridgeActivity {
         if (appHost != null && appHost.equals(host)) return true;
 
         return bridge.getAppAllowNavigationMask().matches(host);
+    }
+
+    /**
+     * The only hosts allowed to open in the system browser.
+     *
+     * These are the ones the app itself links out to: league broadcasters, UEFA,
+     * the FIFA+ watch pages, and the data providers. Everything else — which in
+     * practice means every advert network a provider frame reaches for — is
+     * dropped silently.
+     *
+     * Kept as an explicit list rather than a rule like "anything not the app",
+     * because a popup gives the native layer no way to tell a link the app
+     * rendered from an ad the page opened by itself. Only the former is a
+     * destination the user asked for.
+     */
+    private static final String[] EXTERNAL_LINK_HOSTS = {
+        "premierleague.com",
+        "www.premierleague.com",
+        "laliga.com",
+        "www.laliga.com",
+        "legaseriea.it",
+        "en.legaseriea.it",
+        "bundesliga.com",
+        "www.bundesliga.com",
+        "ligue1.com",
+        "www.ligue1.com",
+        "mlssoccer.com",
+        "www.mlssoccer.com",
+        "uefa.com",
+        "www.uefa.com",
+        "fifa.com",
+        "www.fifa.com",
+        "thesportsdb.com",
+        "www.thesportsdb.com",
+    };
+
+    private boolean isDeliberateLink(Uri url) {
+        String host = url == null ? null : url.getHost();
+        if (host == null) return false;
+        for (String allowed : EXTERNAL_LINK_HOSTS) {
+            if (host.equalsIgnoreCase(allowed)) return true;
+        }
+        return false;
     }
 
     private void openExternally(Uri url) {
