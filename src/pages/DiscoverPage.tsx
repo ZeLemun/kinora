@@ -1,12 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { discover } from '../services/catalog';
+import { discover, type DiscoverType } from '../services/catalog';
 import { useGenres } from '../hooks/useCatalog';
 import { ListItem, PosterGrid } from '../components/MediaCard';
 import { EmptyState, SkeletonCard } from '../components/ui';
 import { cn } from '../utils/cn';
-import type { MediaType } from '../store/app-store';
 
 type SortKey =
   | 'trending'
@@ -18,8 +17,9 @@ type SortKey =
   | 'topRatedSeries'
   | 'recent';
 
-const SORTS: { key: SortKey; label: string; type: MediaType; sortBy: string }[] = [
-  { key: 'trending', label: 'Trending', type: 'movie', sortBy: 'popularity.desc' },
+const SORTS: { key: SortKey; label: string; type: DiscoverType; sortBy: string }[] = [
+  // Trending spans both, so it browses everything rather than films only.
+  { key: 'trending', label: 'Trending', type: 'all', sortBy: 'popularity.desc' },
   { key: 'popularMovies', label: 'Popular Movies', type: 'movie', sortBy: 'popularity.desc' },
   { key: 'topRatedMovies', label: 'Top Rated Movies', type: 'movie', sortBy: 'vote_average.desc' },
   { key: 'nowPlaying', label: 'In Cinemas', type: 'movie', sortBy: 'primary_release_date.desc' },
@@ -37,13 +37,17 @@ export function DiscoverPage() {
 
   const sortKey = (params.get('sort') as SortKey) ?? 'trending';
   const sort = SORTS.find((s) => s.key === sortKey) ?? SORTS[0];
-  const type: MediaType = (params.get('type') as MediaType) ?? sort.type;
+  // `all` shows films and series together. It is the default, so landing on
+  // Discover is not "movies only" — a sort chip that implies otherwise
+  // (Popular Series) still switches the type when picked.
+  const typeParam = params.get('type') as DiscoverType | null;
+  const type: DiscoverType = typeParam ?? (sortKey === 'trending' ? 'all' : sort.type);
   const genreId = params.get('genre') ? Number(params.get('genre')) : undefined;
   const year = params.get('year') ? Number(params.get('year')) : undefined;
 
   const [grid, setGrid] = useState<'grid' | 'list'>('grid');
 
-  const genres = useGenres(type);
+  const genres = useGenres(type === 'series' ? 'series' : 'movie');
 
   const query = useInfiniteQuery({
     queryKey: ['discover', sortKey, type, genreId, year],
@@ -106,7 +110,7 @@ export function DiscoverPage() {
         {/* Type + genre + year + layout */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex w-full flex-none gap-1 rounded-lg bg-card p-1 sm:w-auto">
-            {(['movie', 'series'] as MediaType[]).map((t) => (
+            {(['all', 'movie', 'series'] as DiscoverType[]).map((t) => (
               <button
                 key={t}
                 onClick={() => patch({ type: t })}
@@ -116,7 +120,7 @@ export function DiscoverPage() {
                   type === t ? 'bg-elevated text-text' : 'text-text-muted hover:text-text'
                 )}
               >
-                {t === 'movie' ? 'Movies' : 'Series'}
+                {t === 'all' ? 'All' : t === 'movie' ? 'Movies' : 'Series'}
               </button>
             ))}
           </div>

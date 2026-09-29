@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { immersive } from '../services/immersive';
+import { withAutoplay } from '../services/embed-providers';
 
 /**
  * Plays an `embed` source: a whole web page in an <iframe>.
@@ -26,6 +27,7 @@ export function EmbedPlayer({
   src,
   title,
   providerName,
+  providerId,
   onExit,
   onSwitchSource,
 }: {
@@ -34,6 +36,8 @@ export function EmbedPlayer({
   title: string;
   /** Shown in the app's own bar, e.g. "VidSrc". The provider shows the title. */
   providerName?: string;
+  /** Used to look up the provider's autoplay flag. */
+  providerId?: string;
   onExit: () => void;
   onSwitchSource?: () => void;
 }) {
@@ -95,7 +99,10 @@ export function EmbedPlayer({
     <div className="relative isolate h-full w-full bg-black">
       <iframe
         key={`${src}#${reloadKey}`}
-        src={src}
+        /* Autoplay is requested on the URL *and* permitted by `allow` below.
+           Either alone is ignored by the browser, and the two failures look
+           identical from here: a player sitting on its poster. */
+        src={providerId ? withAutoplay(src, providerId) : src}
         title={title}
         onLoad={() => setLoading(false)}
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
@@ -174,17 +181,18 @@ export function EmbedPlayer({
       {/*
         Tap target for bringing the bar back.
 
-        Deliberately a thin strip along the very top rather than the whole
-        screen: the provider's own pause, seek and volume controls sit under
-        this frame, and a full-screen catcher is exactly what made "every button
-        on the player" feel dead. This covers the only dead zone — the gradient
-        edge — and leaves the rest of the picture alone.
+        Mounted ONLY while the bar is hidden. When it was always present it sat
+        above the frame's own top controls and swallowed their taps, which is
+        why pressing a player button needed several tries: the first press hit
+        this invisible catcher, and the app looked unresponsive.
       */}
-      <button
-        onClick={revealChrome}
-        aria-label="Show player controls"
-        className="absolute inset-x-0 top-0 z-20 h-14"
-      />
+      {!chromeVisible ? (
+        <button
+          onClick={revealChrome}
+          aria-label="Show player controls"
+          className="absolute inset-x-0 top-0 z-20 h-16"
+        />
+      ) : null}
     </div>
   );
 }

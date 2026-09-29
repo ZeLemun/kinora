@@ -184,8 +184,17 @@ export async function fetchRow(key: RowKey, page = 1): Promise<Media[]> {
 /*  Discover                                                           */
 /* ------------------------------------------------------------------ */
 
+/**
+ * What the browse page is listing.
+ *
+ * `all` is not a TMDB concept: `/discover/movie` and `/discover/tv` are separate
+ * endpoints, so "everything" has to be both fetched and merged here rather than
+ * by pointing at some combined route.
+ */
+export type DiscoverType = MediaType | 'all';
+
 export interface DiscoverFilters {
-  type: MediaType;
+  type: DiscoverType;
   genreId?: number;
   sortBy?: string;
   year?: number;
@@ -193,20 +202,53 @@ export interface DiscoverFilters {
 }
 
 export async function discover(f: DiscoverFilters): Promise<{ results: Media[]; total: number }> {
-  const { type, genreId, sortBy, year, page = 1 } = f;
-  const data = required(
-    await tmdb.discover(type === 'movie' ? 'movie' : 'tv', {
-      page,
-      genreId: genreId ?? null,
-      sortBy: sortBy ?? 'popularity.desc',
-      year: year ?? null,
-    }),
-    'discover'
-  );
-  return {
-    results: data.results.map((r) => mapListItem(r, type)),
-    total: data.total_results ?? data.results.length,
-  };
+  const { type, genreId, sortBy = 'popularity.desc', year, page = 1 } = f;
+
+  const fetchOne = async (t: 'movie' | 'tv') =>
+    required(
+      await tmdb.discover(t, { page, genreId: genreId ?? null, sortBy, year: year ?? null }),
+      'discover'
+    );
+
+  if (type !== 'all') {
+    // The app calls it 'series'; TMDB calls it 'tv'.
+    const data = await fetchOne(type === 'movie' ? 'movie' : 'tv');
+    return {
+      results: data.results.map((r) => mapListItem(r, type)),
+      total: data.total_results ?? data.results.length,
+    };
+  }
+
+  // Both endpoints, in parallel. A failure in one should not blank the page, so
+  // each is settled independently and a partial result is still shown.
+  const [movies, series] = await Promise.allSettled([fetchOne('movie'), fetchOne('tv')]);
+
+  const films: Media[] =
+    movies.status === 'fulfilled' ? movies.value.results.map((r) => mapListItem(r, 'movie')) : [];
+  const shows: Media[] =
+    series.status === 'fulfilled' ? series.value.results.map((r) => mapListItem(r, 'series')) : [];
+
+  /*
+   * Interleaved rather than concatenated or re-sorted.
+   *
+   * Concatenating would put twenty films before a single series, which reads as
+   * "this page is still movie-only" — exactly the complaint. Re-sorting is not
+   * an option either: `Media` carries no popularity figure, and the two
+   * endpoints' date sorts are not comparable, so any merge key would be a
+   * fabrication. Alternating keeps each endpoint's own ordering intact while
+   * guaranteeing both types appear from the first row.
+   */
+  const combined: Media[] = [];
+  for (let i = 0; i < Math.max(films.length, shows.length); i++) {
+    if (i < films.length) combined.push(films[i]);
+    if (i < shows.length) combined.push(shows[i]);
+  }
+
+  const total =
+    (movies.status === 'fulfilled' ? movies.value.total_results ?? movies.value.results.length : 0) +
+    (series.status === 'fulfilled' ? series.value.total_results ?? series.value.results.length : 0);
+
+  return { results: combined, total };
 }
 
 export async function loadMovie(id: number): Promise<Media> {
@@ -229,8 +271,22 @@ export interface SearchResults {
   people: Person[];
 }
 
-function isMovie(x: any): boolean {
-  return x?.media_type === 'movie' || (x?.media_type === undefined && 'title' in x);
+/**
+ * Whether a multi-search result is a title we can show.
+ *
+ * This used to be `isMovie` and only accepted `media_type === 'movie'`, and the
+ * caller did `if (!isMovie(raw)) continue`. That silently discarded every TV
+ * result, so searching for a series — "Breaking Bad" — returned nothing at all
+ * even though TMDB had it as the first hit. It has to mean "a film or a
+ * series", not "a film".
+ *
+ * The `media_type === undefined` branch covers a non-multi search, where TMDB
+ * omits the field and the shape implies the type.
+ */
+function isTitle(x: any): boolean {
+  if (x?.media_type === 'movie' || x?.media_type === 'tv') return true;
+  if (x?.media_type !== undefined) return false;
+  return 'title' in x || 'name' in x;
 }
 
 /** Multi search across titles and people, split for the tabbed search page. */
@@ -256,7 +312,7 @@ export async function search(query: string, page = 1): Promise<SearchResults> {
       }
       continue;
     }
-    if (!isMovie(raw)) continue;
+    if (!isTitle(raw)) continue;
     if (media.length >= 40) break;
     const type = raw.media_type === 'movie' ? 'movie' : 'series';
     const mapped = mapListItem(raw, type);

@@ -47,8 +47,28 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(ImmersivePlugin.class);
+        registerPlugin(BackButtonPlugin.class);
         super.onCreate(savedInstanceState);
         installNavigationGuards();
+    }
+
+    /**
+     * Hand the back button to the web app while the player holds it.
+     *
+     * Without this, back on the player route finished the activity and dumped
+     * the viewer to the launcher. See BackButtonPlugin for why history is not a
+     * usable fallback here.
+     *
+     * `onBackPressed` rather than `onKeyDown`: from Android 13 the back gesture
+     * is routed through the OnBackInvokedDispatcher and KEYCODE_BACK is never
+     * delivered, so an onKeyDown override silently does nothing. This override
+     * did nothing for the same reason until it was changed — the symptom is
+     * identical (app closes), so it is worth stating plainly.
+     */
+    @Override
+    public void onBackPressed() {
+        if (BackButtonPlugin.dispatchOnBack()) return;
+        super.onBackPressed();
     }
 
     private void installNavigationGuards() {

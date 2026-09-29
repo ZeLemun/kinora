@@ -28,6 +28,18 @@ export interface EmbedProvider {
    * is not detectable server-side.
    */
   imdbKeyed?: boolean;
+  /**
+   * Query fragment appended so playback starts without a tap.
+   *
+   * Most of these accept `autoplay=1`; VidCore documents `autoplay=true`, so
+   * the value is per-provider rather than hard-coded. The <iframe> also needs
+   * `allow="autoplay"` — without it the browser refuses regardless of what the
+   * page asks for, which looks exactly like a provider that ignored the flag.
+   *
+   * Set to `false` for a provider that does not support it; an unsupported
+   * parameter is ignored by most, but it is not worth sending blind.
+   */
+  autoplay?: string | false;
 }
 
 /**
@@ -51,6 +63,8 @@ export const EMBED_PROVIDERS: EmbedProvider[] = [
     movie: (id) => `https://vidcore.org/embed/movie/${id}`,
     tv: (id, s, e) => `https://vidcore.org/embed/tv/${id}/${s}/${e}`,
     hasTracks: true,
+    // Documented by the provider itself as `?autoplay=true`.
+    autoplay: 'autoplay=true',
   },
   {
     id: 'superembed',
@@ -110,4 +124,18 @@ export function getEmbedSources(
 export function getPrimaryEmbed(media: { id: number; type: 'movie' | 'tv' }, season?: number, episode?: number): string {
   const p = EMBED_PROVIDERS[0];
   return media.type === 'movie' ? p.movie(media.id) : p.tv(media.id, season ?? 1, episode ?? 1);
+}
+
+/**
+ * Adds a provider's autoplay flag to a URL built by `getEmbedSources`.
+ *
+ * Kept separate from the builders so the URL that is *offered* in the source
+ * list stays the plain embed URL — the flag is a presentation concern of the
+ * player, and baking it in meant the chooser advertised URLs the app never used.
+ */
+export function withAutoplay(url: string, providerId: string): string {
+  const provider = EMBED_PROVIDERS.find((p) => p.id === providerId);
+  const flag = provider?.autoplay === undefined ? 'autoplay=1' : provider.autoplay;
+  if (!flag) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}${flag}`;
 }
