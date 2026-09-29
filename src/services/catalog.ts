@@ -340,9 +340,6 @@ export async function fetchGenres(type: MediaType): Promise<Genre[]> {
 }
 
 const genreCache: Partial<Record<MediaType, Genre[]>> = {};
-export function cachedGenres(type: MediaType): Genre[] | undefined {
-  return genreCache[type];
-}
 export function rememberGenres(type: MediaType, genres: Genre[]) {
   genreCache[type] = genres;
 }

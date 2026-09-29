@@ -130,12 +130,6 @@ export function getEmbedSources(
   }));
 }
 
-/** A single "best effort" embed — the first provider in the list. */
-export function getPrimaryEmbed(media: { id: number; type: 'movie' | 'tv' }, season?: number, episode?: number): string {
-  const p = EMBED_PROVIDERS[0];
-  return media.type === 'movie' ? p.movie(media.id) : p.tv(media.id, season ?? 1, episode ?? 1);
-}
-
 /**
  * Adds a provider's autoplay flag to a URL built by `getEmbedSources`.
  *

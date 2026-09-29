@@ -128,6 +128,3 @@ export function bestSource(
   if (sources.length === 0) return undefined;
   return rankSources(sources, probes)[0];
 }
-
-export const fmtSize = (bytes?: number) =>
-  !bytes || bytes <= 0 ? '' : `${(bytes / 1_000_000).toFixed(0)} MB`;

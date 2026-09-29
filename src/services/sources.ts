@@ -234,11 +234,3 @@ export function mergeSources(archive: MediaSource[], trailer: MediaSource | null
   if (trailer && !list.some((s) => s.url === trailer.url)) list.push(trailer);
   return list;
 }
-
-/** @deprecated Kept only so nothing imports the old blocking resolver. */
-export async function resolveSources(media: Media): Promise<MediaSource[]> {
-  const hits = await searchArchive(media.title, media.year)
-    .catch((): ArchiveHit[] => [])
-    .then((list) => Promise.all(list.slice(0, 3).map(toSource)));
-  return mergeSources(hits.filter((s) => s !== null), trailerSource(media));
-}

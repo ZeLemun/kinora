@@ -263,12 +263,6 @@ export const selectSkipIntro = (s: AppState) => s.settings.skipIntro;
 /** Progress record for a specific media ID. */
 export const selectProgressFor = (id: string) => (s: AppState) => s.progress[mediaKey(id)];
 
-/** Set progress action. */
-export const selectSetProgress = (s: AppState) => s.setProgress;
-
-/** Mark watched action. */
-export const selectMarkWatched = (s: AppState) => s.markWatched;
-
 /** Clear progress action. */
 export const selectClearProgress = (s: AppState) => s.clearProgress;
 
