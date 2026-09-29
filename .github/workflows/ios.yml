@@ -43,10 +43,36 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The API keys have to be written out before `npm run build`.
+      #
+      # `.env` is gitignored, so the runner has no keys, and Vite inlines
+      # `import.meta.env.VITE_*` at build time. Without this the bundle ships
+      # with an empty key, every TMDB call 401s, and the app installs and
+      # launches perfectly while Home, Discover and Search all show nothing —
+      # which is exactly what the first signed build did.
+      - name: Write .env
+        run: |
+          {
+            echo "VITE_TMDB_API_KEY=${{ secrets.VITE_TMDB_API_KEY }}"
+            echo "VITE_OMDB_API_KEY=${{ secrets.VITE_OMDB_API_KEY }}"
+          } > .env
+          echo "wrote .env (key length: $(grep -o 'VITE_TMDB_API_KEY=.' .env | wc -c))"
+
       # The web bundle has to exist before the native sync, or the app ships
       # whatever was last committed into ios/App/public.
       - name: Build web bundle
         run: npm run build
+
+      - name: Verify the key reached the bundle
+        run: |
+          # A bundle without the key still builds, installs and launches, and
+          # simply shows empty pages forever. This turns that silent failure
+          # into a red build.
+          if ! grep -q "${{ secrets.VITE_TMDB_API_KEY }}" dist/assets/*.js; then
+            echo "::error::TMDB key is not in the built bundle — the app would install and show nothing"
+            exit 1
+          fi
+          echo "key is present in dist/assets"
 
       - name: Sync Capacitor
         run: npx cap sync ios
