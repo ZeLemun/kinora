@@ -56,8 +56,13 @@ jobs:
 
       - name: Build unsigned archive
         run: |
+          # The .xcodeproj, not the .xcworkspace. There is no workspace here:
+          # Capacitor 8 pulls its iOS dependency in via SwiftPM (CapApp-SPM),
+          # and no CocoaPods step ever runs, so no .xcworkspace is generated.
+          # Pointing xcodebuild at one fails instantly with
+          # "does not exist", which is exactly what the first run did.
           xcodebuild \
-            -workspace ios/App/App.xcworkspace \
+            -project ios/App/App.xcodeproj \
             -scheme App \
             -configuration Release \
             -sdk iphoneos \
