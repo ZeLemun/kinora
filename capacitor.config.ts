@@ -25,7 +25,6 @@ const IN_APP_HOSTS = [
   'player.vimeo.com',
   'www.youtube.com',
   'www.youtube-nocookie.com',
-  'www.fifa.com',
   'archive.org',
 ];
 

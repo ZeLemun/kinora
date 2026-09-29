@@ -355,7 +355,8 @@ export function PlayerPage() {
         <EmbedPlayer
           key={source.url}
           src={source.url}
-          title={`${title} · ${source.label}`}
+          title={title}
+          providerName={source.label}
           onExit={exit}
           onSwitchSource={() => setChooserOpen(true)}
         />

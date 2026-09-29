@@ -68,13 +68,6 @@ const SettingsIcon: Icon = ({ className }) => (
   </svg>
 );
 
-const BallIcon: Icon = ({ className }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-    <circle cx="12" cy="12" r="9" />
-    <path d="m12 7 4 3-1.5 4.5h-5L8 10zM12 3v4M3.6 9.5 8 10m12.4-.5L16 10" />
-  </svg>
-);
-
 /* ------------------------------------------------------------------ */
 /*  Navigation model                                                   */
 /* ------------------------------------------------------------------ */
@@ -88,7 +81,6 @@ interface NavItem {
 const PRIMARY: NavItem[] = [
   { to: '/', label: 'Home', icon: HomeIcon },
   { to: '/discover', label: 'Discover', icon: CompassIcon },
-  { to: '/sports', label: 'Sports', icon: BallIcon },
   { to: '/movies', label: 'Movies', icon: FilmIcon },
   { to: '/series', label: 'Series', icon: TvIcon },
 ];
@@ -100,8 +92,17 @@ const SECONDARY: NavItem[] = [
   { to: '/watchlist', label: 'Watchlist', icon: BookmarkIcon },
 ];
 
-/** Mobile keeps four items; everything else lives behind the "More" sheet. */
-const MOBILE_PRIMARY: NavItem[] = [PRIMARY[0], PRIMARY[1], PRIMARY[2], SECONDARY[1]];
+/**
+ * Mobile keeps four items; everything else lives behind the "More" sheet.
+ *
+ * Picked by path rather than by index. `PRIMARY[2]` used to be Sports, so
+ * deleting that entry would have quietly turned the third tab into Movies
+ * with no error anywhere.
+ */
+const MOBILE_PATHS = ['/', '/discover', '/movies', '/library'];
+const MOBILE_PRIMARY: NavItem[] = [...PRIMARY, ...SECONDARY].filter((i) =>
+  MOBILE_PATHS.includes(i.to)
+);
 
 const MORE_ITEMS: NavItem[] = [
   { to: '/movies', label: 'Movies', icon: FilmIcon },

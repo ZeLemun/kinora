@@ -10,26 +10,37 @@ import { immersive } from '../services/immersive';
  * exposes only what the host app can still control: leaving the player,
  * reloading a frame that wedged, and moving between sources.
  *
- * It does NOT reimplement a seek bar or a play/pause button. An <iframe> is an
- * opaque document: there is no `currentTime` to write to and no `paused` to set,
- * so a control bar drawn here would be decoration that does nothing. The
- * provider's own controls are already inside the frame.
+ * It does NOT reimplement a seek bar, a play/pause button, subtitles, volume or
+ * settings. An <iframe> is an opaque cross-origin document: there is no
+ * `currentTime` to write to, no `paused` to set, and no subtitle track list to
+ * read, so controls drawn here would be decoration that does nothing. The
+ * provider's own versions are already inside the frame, and those are the ones
+ * that actually work. Anything the host app wants to control has to be a direct
+ * file source rather than an embed.
+ *
+ * The chrome is persistent rather than auto-hiding for the same reason: this
+ * player does not own the transport, so it cannot re-show a control bar on tap
+ * the way VideoPlayer does. Fading would leave the viewer with no way out.
  */
 export function EmbedPlayer({
   src,
   title,
+  providerName,
   onExit,
   onSwitchSource,
 }: {
   src: string;
+  /** Used for the iframe's accessible name only — never rendered on screen. */
   title: string;
+  /** Shown in the app's own bar, e.g. "VidSrc". The provider shows the title. */
+  providerName?: string;
   onExit: () => void;
   onSwitchSource?: () => void;
 }) {
   const [loading, setLoading] = useState(true);
   /** Bumped to force a fresh document — the recovery path for a wedged frame. */
   const [reloadKey, setReloadKey] = useState(0);
-  const chromeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [chromeVisible, setChromeVisible] = useState(true);
 
   /* Same full-bleed contract as VideoPlayer: a portrait player leaves most of a
      phone screen black, and landscape is held for as long as this is mounted. */
@@ -42,37 +53,46 @@ export function EmbedPlayer({
     };
   }, []);
 
-  /* Many of these providers show an interstitial or an ad break before the
-     player appears. Reloading has to be reachable, otherwise a frame that
-     stalls on its own ad server leaves the viewer with no way out but back. */
+  /* `onExit` is intentionally NOT a dependency below. The parent recreates that
+     closure every render, so including it re-ran this effect constantly and
+     `setLoading(true)` re-asserted itself forever: the spinner never cleared
+     and, because it covers the screen, it swallowed every tap meant for the
+     provider's own controls. Held in a ref instead. */
+  const onExitRef = useRef(onExit);
+  onExitRef.current = onExit;
+
+  /* Escape exits. Bound once, on the ref, so the listener is never torn down
+     and re-added on every render. */
   useEffect(() => {
-    setLoading(true);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onExit();
+      if (e.key === 'Escape') onExitRef.current();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onExit, reloadKey, src]);
+  }, []);
 
-  const revealChrome = () => {
-    if (chromeTimer.current) clearTimeout(chromeTimer.current);
-    chromeTimer.current = setTimeout(() => setChromeVisible(false), 3200);
-  };
-
-  const [chromeVisible, setChromeVisible] = useState(true);
-
-  /* A tap anywhere on the frame is swallowed by the provider's own controls, so
-     chrome is revealed on load and on tap-over rather than auto-hiding fast. */
+  /* Loading is tied to the frame's own document, nothing else. */
   useEffect(() => {
-    revealChrome();
-    return () => {
-      if (chromeTimer.current) clearTimeout(chromeTimer.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src, reloadKey]);
+    setLoading(true);
+  }, [reloadKey, src]);
+
+  /* The bar hides while the film is being watched and comes back on a tap near
+     the top edge. It is not a full-screen tap target: the provider's own
+     controls live under this frame, and a screen-wide catcher would eat every
+     press meant for them. */
+  useEffect(() => {
+    const timer = setTimeout(() => setChromeVisible(false), 4000);
+    return () => clearTimeout(timer);
+  }, [chromeVisible, src, reloadKey]);
+
+  const revealChrome = () => setChromeVisible(true);
 
   return (
-    <div className="relative h-full w-full bg-black">
+    /* `isolate` matters: once the provider's video starts, the <iframe> is
+       promoted to its own compositing layer and paints over anything that is
+       merely a sibling. Without an isolated stacking context the top bar gets
+       swallowed exactly when it is needed most — while the film is playing. */
+    <div className="relative isolate h-full w-full bg-black">
       <iframe
         key={`${src}#${reloadKey}`}
         src={src}
@@ -92,28 +112,42 @@ export function EmbedPlayer({
 
       {/* Chrome. Kept mounted and toggled by opacity so switching sources never
           remounts the iframe and restarts playback. */}
+      {/*
+        Persistent-while-wanted chrome. It hides itself while the film is being
+        watched and returns on a tap near the top edge.
+
+        `z-30` plus the `isolate` on the container are load-bearing: the frame
+        gets its own compositing layer the moment video starts, and without
+        both it painted straight over this bar.
+      */}
       <div
-        className={`pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 bg-gradient-to-b from-black/80 to-transparent p-3 transition-opacity duration-300 ${
-          chromeVisible ? 'opacity-100' : 'opacity-0'
+        className={`absolute inset-x-0 top-0 z-30 flex items-center gap-2 bg-gradient-to-b from-black/85 via-black/45 to-transparent p-2.5 transition-opacity duration-200 ${
+          chromeVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
         }`}
       >
         <button
           onClick={onExit}
-          aria-label="Close player"
-          className="pointer-events-auto flex h-10 w-10 flex-none items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm transition-colors hover:bg-black/75"
+          aria-label="Back to title"
+          className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-colors active:bg-black/85"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </button>
 
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-white/90">{title}</span>
+        {/* No title here. The provider draws its own over the video, and
+            printing a second one stacked on top of it was the duplicate the
+            viewer saw in the corner. The source name is still worth knowing, so
+            only the provider is named. */}
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-white/90">
+          {providerName}
+        </span>
 
         {onSwitchSource ? (
           <button
             onClick={onSwitchSource}
             aria-label="Change source"
-            className="pointer-events-auto flex flex-none gap-1.5 rounded-full bg-black/55 px-3 py-2 text-xs font-medium text-white/90 backdrop-blur-sm transition-colors hover:bg-black/75"
+            className="flex flex-none gap-1.5 rounded-full bg-black/60 px-3.5 py-2.5 text-xs font-medium text-white/90 backdrop-blur-sm transition-colors active:bg-black/85"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
@@ -126,10 +160,9 @@ export function EmbedPlayer({
           onClick={() => {
             setLoading(true);
             setReloadKey((k) => k + 1);
-            revealChrome();
           }}
           aria-label="Reload player"
-          className="pointer-events-auto flex h-10 w-10 flex-none items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-sm transition-colors hover:bg-black/75"
+          className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-colors active:bg-black/85"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v6h6M20 20v-6h-6" />
@@ -138,11 +171,19 @@ export function EmbedPlayer({
         </button>
       </div>
 
-      {/* Tap surface: first tap brings the chrome back if it faded. */}
+      {/*
+        Tap target for bringing the bar back.
+
+        Deliberately a thin strip along the very top rather than the whole
+        screen: the provider's own pause, seek and volume controls sit under
+        this frame, and a full-screen catcher is exactly what made "every button
+        on the player" feel dead. This covers the only dead zone — the gradient
+        edge — and leaves the rest of the picture alone.
+      */}
       <button
         onClick={revealChrome}
         aria-label="Show player controls"
-        className="absolute inset-x-0 bottom-0 h-24"
+        className="absolute inset-x-0 top-0 z-20 h-14"
       />
     </div>
   );

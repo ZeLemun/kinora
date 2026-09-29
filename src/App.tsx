@@ -13,7 +13,6 @@ import { SearchPage } from './pages/SearchPage';
 import { LibraryPage } from './pages/LibraryPage';
 import { DetailPage } from './pages/DetailPage';
 import { SettingsPage } from './pages/SettingsPage';
-import { SportsPage } from './pages/SportsPage';
 import { PlayerPage } from './pages/PlayerPage';
 
 /**
@@ -67,7 +66,6 @@ function Shell() {
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/watchlist" element={<LibraryPage initialTab="watchlist" />} />
             <Route path="/favorites" element={<LibraryPage initialTab="favorites" />} />
-            <Route path="/sports" element={<SportsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/movie/:id" element={<DetailPage type="movie" />} />
             <Route path="/series/:id" element={<DetailPage type="series" />} />

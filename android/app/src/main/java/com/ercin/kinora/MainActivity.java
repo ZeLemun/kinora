@@ -140,36 +140,18 @@ public class MainActivity extends BridgeActivity {
     /**
      * The only hosts allowed to open in the system browser.
      *
-     * These are the ones the app itself links out to: league broadcasters, UEFA,
-     * the FIFA+ watch pages, and the data providers. Everything else — which in
-     * practice means every advert network a provider frame reaches for — is
-     * dropped silently.
+     * Empty on purpose. The sports section was the only thing in the app that
+     * linked out to a third-party site, and it has been removed — so today there
+     * is no destination the user asked to be sent to, and every popup is
+     * advert machinery from inside a provider frame.
      *
-     * Kept as an explicit list rather than a rule like "anything not the app",
-     * because a popup gives the native layer no way to tell a link the app
-     * rendered from an ad the page opened by itself. Only the former is a
-     * destination the user asked for.
+     * The list is kept as the seam to re-add hosts: a popup gives the native
+     * layer no way to tell a link the app rendered from an ad the page opened by
+     * itself, so "does the app ever mean to go here" has to be answered
+     * explicitly. Populating it with something to trust, or using `*` to open
+     * everything, brings the ad-in-Chrome bug straight back.
      */
-    private static final String[] EXTERNAL_LINK_HOSTS = {
-        "premierleague.com",
-        "www.premierleague.com",
-        "laliga.com",
-        "www.laliga.com",
-        "legaseriea.it",
-        "en.legaseriea.it",
-        "bundesliga.com",
-        "www.bundesliga.com",
-        "ligue1.com",
-        "www.ligue1.com",
-        "mlssoccer.com",
-        "www.mlssoccer.com",
-        "uefa.com",
-        "www.uefa.com",
-        "fifa.com",
-        "www.fifa.com",
-        "thesportsdb.com",
-        "www.thesportsdb.com",
-    };
+    private static final String[] EXTERNAL_LINK_HOSTS = {};
 
     private boolean isDeliberateLink(Uri url) {
         String host = url == null ? null : url.getHost();
