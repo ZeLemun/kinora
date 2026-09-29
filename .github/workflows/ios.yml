@@ -12,7 +12,10 @@ name: Build iOS (unsigned .ipa)
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    # This repo's default branch is `master`, not `main`. Filtering on `main`
+    # meant the workflow was valid but never fired on a push — and the only way
+    # to tell the difference from "the workflow is broken" is to look.
+    branches: [master, main]
     paths:
       - 'src/**'
       - 'ios/**'
