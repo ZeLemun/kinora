@@ -29,6 +29,11 @@ Thumbs.db
 .idea/
 *.log
 
+# Build artefacts. A .ipa is a 1.2 MB binary that is rebuilt every time, so it
+# does not belong in the history — fetch it from the Actions run instead.
+*.ipa
+*.apk
+
 # CocoaPods artefacts. `ios/App/Podfile` is committed; everything pod install
 # generates is not, and Pods/ alone is tens of thousands of files.
 ios/App/Pods/
