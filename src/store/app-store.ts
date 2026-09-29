@@ -94,15 +94,14 @@ export interface ProgressRecord {
 
 export interface Settings {
   theme: 'dark' | 'light' | 'system';
+  /**
+   * UI language. This is a preference only: the catalogue is fetched from TMDB
+   * in a fixed locale, so changing it does not yet re-fetch in that language.
+   */
   language: string;
   autoplayNextEpisode: boolean;
   rememberPosition: boolean;
   skipIntro: boolean;
-  showPlayerControls: boolean;
-  defaultQuality: 'auto' | '1080p' | '720p' | '480p';
-  defaultSubtitleLang: string;
-  newContentNotifications: boolean;
-  continueWatchingReminders: boolean;
 }
 
 interface AppState {
@@ -130,11 +129,6 @@ const defaultSettings: Settings = {
   autoplayNextEpisode: true,
   rememberPosition: true,
   skipIntro: false,
-  showPlayerControls: true,
-  defaultQuality: 'auto',
-  defaultSubtitleLang: 'en',
-  newContentNotifications: false,
-  continueWatchingReminders: false,
 };
 
 const EMPTY = { progress: {}, watchlist: [], favorites: [], history: [], settings: defaultSettings };
@@ -262,6 +256,9 @@ export const selectAutoplayNextEpisode = (s: AppState) => s.settings.autoplayNex
 
 /** Remember position setting. */
 export const selectRememberPosition = (s: AppState) => s.settings.rememberPosition;
+
+/** Whether the player offers a "Skip Intro" control. */
+export const selectSkipIntro = (s: AppState) => s.settings.skipIntro;
 
 /** Progress record for a specific media ID. */
 export const selectProgressFor = (id: string) => (s: AppState) => s.progress[mediaKey(id)];

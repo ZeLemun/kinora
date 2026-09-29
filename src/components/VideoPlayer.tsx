@@ -55,6 +55,16 @@ export interface VideoPlayerProps {
   hasPrevious?: boolean;
   onPrevious?: () => void;
   autoPlay?: boolean;
+  /**
+   * Receives the <video> element once mounted.
+   *
+   * Callers use this instead of `document.querySelector('video')`. That query
+   * looks harmless and is not: it searches the whole document, so it can return
+   * a video belonging to something else entirely, and it returns null whenever it
+   * runs before the element exists — which it did, because an effect on the page
+   * runs before a child has mounted.
+   */
+  onVideo?: (el: HTMLVideoElement | null) => void;
   children?: ReactNode;
 }
 
@@ -72,11 +82,22 @@ export function VideoPlayer({
   hasPrevious,
   onPrevious,
   autoPlay = true,
+  onVideo,
   children,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seekedToStart = useRef(false);
+
+  /* Hand the element to the parent so it can drive playback (skip intro) without
+     reaching into the document for it. Kept in a ref so a re-render of the
+     parent does not re-run this and re-fire the callback with the same node. */
+  const onVideoRef = useRef(onVideo);
+  onVideoRef.current = onVideo;
+  useEffect(() => {
+    onVideoRef.current?.(videoRef.current);
+    return () => onVideoRef.current?.(null);
+  }, []);
 
   const autoplayNextEpisode = useAppStore(selectAutoplayNextEpisode);
 
@@ -333,9 +354,17 @@ export function VideoPlayer({
   const shownTime = scrub ?? time;
 
   /**
-   * Tapping the picture never pauses. It only walks one level deeper into the
-   * controls: hidden → transport bar, transport bar → the extras panel with
-   * volume, skip and speed. Pausing is the play button's job alone.
+   * Tapping the picture never pauses. It walks one level deeper into the
+   * controls, and back out again.
+   *
+   *   hidden controls → transport bar → extras panel → transport bar
+   *
+   * The step back out matters. The previous version only ever went *in*, so a
+   * tap on the picture with the extras panel already open just re-opened it
+   * and closed the transport bar underneath — the viewer could get the panel
+   * stuck on with no route back except a different control.
+   *
+   * Pausing is the play button's job alone.
    */
   const onPictureTap = useCallback(() => {
     if (upNextOpen) return;
@@ -343,15 +372,15 @@ export function VideoPlayer({
       revealChrome();
       return;
     }
-    if (menuOpen) {
+    // Already one level in: step back out rather than pushing further.
+    if (extras || menuOpen) {
+      setExtras(false);
       setMenuOpen(false);
+      revealChrome();
       return;
     }
-    setExtras((e) => {
-      if (e) revealChrome();
-      return !e;
-    });
-  }, [chrome, menuOpen, upNextOpen, revealChrome]);
+    setExtras(true);
+  }, [chrome, extras, menuOpen, upNextOpen, revealChrome]);
 
   return (
     <div

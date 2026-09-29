@@ -11,7 +11,7 @@ import { TrailerModal } from '../components/TrailerModal';
 import { EmptyState } from '../components/ui';
 import { usePlayer } from '../hooks/usePlayer';
 import { useSourcePicker } from '../hooks/useSourcePicker';
-import { useAppStore, type Episode, type Media, type MediaSource, selectProgressFor, selectRememberPosition, selectSetProgressAction, selectMarkWatchedAction } from '../store/app-store';
+import { useAppStore, type Episode, type Media, type MediaSource, selectProgressFor, selectRememberPosition, selectSkipIntro, selectSetProgressAction, selectMarkWatchedAction } from '../store/app-store';
 
 /** Opening/credits run we let the viewer skip past. */
 const SKIP_INTRO = 90;
@@ -50,6 +50,10 @@ export function PlayerPage() {
   const [picked, setPicked] = useState<string | null>(null);
   const [graceOver, setGraceOver] = useState(false);
   const [showSkip, setShowSkip] = useState(false);
+  /** Live playback position, for the skip-intro window. */
+  const [positionTime, setPositionTime] = useState(0);
+  /** The <video>, handed up by VideoPlayer. Null on an embed source. */
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const skipDismissed = useRef(false);
   const announced = useRef(false);
 
@@ -171,6 +175,14 @@ export function PlayerPage() {
   /** A trailer is an <iframe>, not a <video src>, so it renders differently. */
   const isEmbed = source?.kind === 'embed';
 
+  /**
+   * Whether Skip Intro is offered. The setting existed with a toggle in Settings
+   * but nothing read it, so the button appeared whatever the viewer preferred.
+   * It also only makes sense where the app owns the transport — an embed's
+   * timeline belongs to the provider.
+   */
+  const canSkipIntro = useAppStore(selectSkipIntro) && !isEmbed;
+
   /* Episode navigation ----------------------------------------------- */
   const isSeries = !!media?.seasons?.length;
 
@@ -223,20 +235,32 @@ export function PlayerPage() {
     }
   }, [media, source, setPlaying]);
 
-  /* Skip Intro -------------------------------------------------------- */
+  /**
+   * Skip Intro.
+   *
+   * Driven by a timer rather than by listening for `timeupdate` on
+   * `document.querySelector('video')`. That query was the bug: the listener was
+   * attached in an effect on the page, but the <video> lives inside VideoPlayer
+   * and is not in the document yet when this runs, so `v` was null on a
+   * non-embed source and the button never appeared at all.
+   *
+   * Polling `time` from state keeps this in step with what is actually on
+   * screen, and costs one cheap comparison per tick.
+   */
   useEffect(() => {
-    if (skipDismissed.current) return;
-    const v = document.querySelector('video');
-    if (!v) return;
-    const onTime = () => {
-      if (v.currentTime >= 12 && v.currentTime < SKIP_INTRO) setShowSkip(true);
-      if (v.currentTime >= SKIP_INTRO) setShowSkip(false);
-    };
-    v.addEventListener('timeupdate', onTime);
-    return () => v.removeEventListener('timeupdate', onTime);
-  }, [source?.url]);
+    if (skipDismissed.current || !canSkipIntro) {
+      setShowSkip(false);
+      return;
+    }
+    if (positionTime >= SKIP_INTRO) {
+      setShowSkip(false);
+      return;
+    }
+    setShowSkip(positionTime >= 12);
+  }, [positionTime, canSkipIntro, skipDismissed]);
 
   const onTimeUpdate = (t: number, d: number) => {
+    setPositionTime(t);
     if (!rememberPosition || !media || d <= 0) return;
     setProgress({
       mediaId: recordId,
@@ -389,6 +413,7 @@ export function PlayerPage() {
         startAt={progress?.time ?? 0}
         onExit={exit}
         onTimeUpdate={onTimeUpdate}
+        onVideo={setVideoEl}
         onEnded={() => {
           if (nextEpisode) {
             goToEpisode(nextEpisode.season, nextEpisode.ep.episode);
@@ -419,8 +444,7 @@ export function PlayerPage() {
         {showSkip ? (
           <button
             onClick={() => {
-              const v = document.querySelector('video');
-              if (v) v.currentTime = SKIP_INTRO;
+              if (videoEl) videoEl.currentTime = SKIP_INTRO;
               skipDismissed.current = true;
               setShowSkip(false);
             }}

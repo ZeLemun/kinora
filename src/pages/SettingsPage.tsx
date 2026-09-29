@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAppStore, type Settings } from '../store/app-store';
+import { useAppStore } from '../store/app-store';
 import { ConfirmDialog, Modal, useToast } from '../components/ui';
 import { ShortcutHint } from '../components/VideoPlayer';
 import { cn } from '../utils/cn';
@@ -85,40 +85,10 @@ export function SettingsPage() {
             onChange={(v) => updateSettings({ rememberPosition: v })}
           />
           <Toggle
-            label="Skip intro by default"
-            hint="Jump past the opening automatically"
+            label="Skip intro button"
+            hint="Offer a button that jumps past the opening credits. Applies to direct sources, not embeds."
             checked={settings.skipIntro}
             onChange={(v) => updateSettings({ skipIntro: v })}
-          />
-          <Row label="Default quality">
-            <select
-              value={settings.defaultQuality}
-              onChange={(e) => updateSettings({ defaultQuality: e.target.value as Settings['defaultQuality'] })}
-              aria-label="Default quality"
-              className="input h-9 w-auto py-0 pr-8 text-xs"
-            >
-              {['auto', '1080p', '720p', '480p'].map((q) => (
-                <option key={q} value={q}>
-                  {q === 'auto' ? 'Auto' : q}
-                </option>
-              ))}
-            </select>
-          </Row>
-        </Section>
-
-        {/* Notifications */}
-        <Section title="Notifications">
-          <Toggle
-            label="New content"
-            hint="Tell me when something new is added"
-            checked={settings.newContentNotifications}
-            onChange={(v) => updateSettings({ newContentNotifications: v })}
-          />
-          <Toggle
-            label="Continue watching reminders"
-            hint="Nudge me about things I left part-watched"
-            checked={settings.continueWatchingReminders}
-            onChange={(v) => updateSettings({ continueWatchingReminders: v })}
           />
         </Section>
 
