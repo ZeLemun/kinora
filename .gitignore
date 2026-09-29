@@ -28,3 +28,12 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+
+# CocoaPods artefacts. `ios/App/Podfile` is committed; everything pod install
+# generates is not, and Pods/ alone is tens of thousands of files.
+ios/App/Pods/
+ios/App/Podfile.lock
+ios/App/App.xcworkspace/
+ios/build/
+ios/DerivedData/
+**/xcuserdata/

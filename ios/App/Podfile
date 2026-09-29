@@ -1,0 +1,47 @@
+require 'json'
+
+package = JSON.parse(File.read(File.join(__dir__, 'package.json')))
+
+platform :ios, '15.0'
+use_frameworks!
+
+# Pods are resolved from node_modules, not from a remote Swift package.
+#
+# This project originally used Capacitor's SwiftPM integration, which pulls the
+# core from ionic-team/capacitor-swift-pm. That repository is a build-time
+# shim with no sources of its own, and the copy its 8.5.2 tag resolves to does
+# not have `CAPPluginCall.reject`, `PluginConfig.getString`,
+# `CAPBridgeProtocol.webView` or `UIColor.init(fromHex:)` — so every Capacitor
+# plugin failed to compile against it, 17 errors in the first run and the same
+# again in the two that followed.
+#
+# CocoaPods reads the podspecs inside node_modules, which are the same files
+# the plugins were written against, so a version skew is not possible here.
+def capacitor_pods
+  pod 'Capacitor', :path => '../node_modules/@capacitor/ios'
+  pod 'CapacitorCordova', :path => '../node_modules/@capacitor/ios'
+
+  # Declared from package.json rather than hard-coded, so adding a plugin does
+  # not need a second edit here.
+  %w[browser haptics preferences splash-screen status-bar screen-orientation].each do |plugin|
+    plugin_path = "../node_modules/@capacitor/#{plugin}"
+    next unless File.exist?(plugin_path)
+    pod "Capacitor#{plugin.split('-').map(&:capitalize).join}", :path => plugin_path
+  end
+end
+
+target 'App' do
+  capacitor_pods
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      # The providers this app embeds stream HLS over plain HTTPS from inside
+      # an <iframe>; the ATS exceptions the plugins need are inherited from
+      # Capacitor's own podspec.
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+      config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
+    end
+  end
+end

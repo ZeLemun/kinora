@@ -54,15 +54,25 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_15.4.app
 
+      # CocoaPods, not SwiftPM. The SwiftPM path resolves the Capacitor core
+      # from ionic-team/capacitor-swift-pm, whose 8.5.2 tag has no
+      # CAPPluginCall.reject / PluginConfig.getString / bridge.webView, so every
+      # Capacitor plugin fails to compile against it. CocoaPods reads the
+      # podspecs in node_modules — the same files the plugins target.
+      - name: Install CocoaPods
+        run: sudo gem install cocoapods --no-document
+
+      - name: Install pods
+        working-directory: ios/App
+        run: pod install
+
       - name: Build unsigned archive
         run: |
-          # The .xcodeproj, not the .xcworkspace. There is no workspace here:
-          # Capacitor 8 pulls its iOS dependency in via SwiftPM (CapApp-SPM),
-          # and no CocoaPods step ever runs, so no .xcworkspace is generated.
-          # Pointing xcodebuild at one fails instantly with
-          # "does not exist", which is exactly what the first run did.
+          # The .xcworkspace this time, not the .xcodeproj — pod install
+          # generates it, and building the project directly would not link the
+          # pods.
           xcodebuild \
-            -project ios/App/App.xcodeproj \
+            -workspace ios/App/App.xcworkspace \
             -scheme App \
             -configuration Release \
             -sdk iphoneos \

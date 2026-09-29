@@ -40,16 +40,11 @@ const config: CapacitorConfig = {
     Preferences: {
       group: 'kinora',
     },
-    /*
-     * No SplashScreen and no ScreenOrientation.
-     *
-     * Both were removed because their iOS sources failed to compile against the
-     * Capacitor core the SwiftPM package resolved — 17 errors, all inside
-     * those two packages, calling `reject` / `getString` / `viewController`
-     * members the resolved core does not have. Neither is referenced anywhere
-     * in src, so the fix costs nothing: the launch screen storyboard already
-     * covers the splash, and ImmersivePlugin does the landscape lock.
-     */
+    SplashScreen: {
+      launchShowDuration: 2000,
+      backgroundColor: '#16171d',
+      showSpinner: false,
+    },
     StatusBar: {
       style: 'dark',
       backgroundColor: '#16171d',
