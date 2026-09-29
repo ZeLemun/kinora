@@ -97,7 +97,7 @@ export function PlayerPage() {
   const embedSources: MediaSource[] = useMemo(() => {
     if (!media) return [];
     return getEmbedSources(
-      { id: mediaId, type: isSeriesUrl ? 'tv' : 'movie' },
+      { id: mediaId, type: isSeriesUrl ? 'tv' : 'movie', imdbId: media?.imdbId },
       isSeriesUrl ? Number(season) || 1 : 1,
       episode
     ).map(({ url, provider }) => ({

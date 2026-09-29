@@ -88,7 +88,12 @@ export function DetailPage({ type }: { type: MediaType }) {
      request. This must be declared before the early returns below — a hook
      after a conditional return is React error #310. */
   const embedSources = useMemo(
-    () => getEmbedSources({ id: mediaId, type: type === 'movie' ? 'movie' : 'tv' }, activeSeason, 1),
+    () =>
+      getEmbedSources(
+        { id: mediaId, type: type === 'movie' ? 'movie' : 'tv', imdbId: media?.imdbId },
+        activeSeason,
+        1
+      ),
     [mediaId, type, activeSeason]
   );
 

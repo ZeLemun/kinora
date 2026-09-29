@@ -17,18 +17,39 @@
 export interface EmbedProvider {
   id: string;
   name: string;
-  movie: (tmdbId: number) => string;
-  tv: (tmdbId: number, season: number, episode: number) => string;
+  movie: (tmdbId: number, imdbId?: string) => string;
+  tv: (tmdbId: number, season: number, episode: number, imdbId?: string) => string;
   /** True if the embed supports subtitles/audio tracks via its own UI. */
   hasTracks?: boolean;
+  /**
+   * Set when the provider is keyed on IMDb rather than TMDB. It still receives
+   * the TMDB id, and falls back to it if OMDb never supplied an IMDb one —
+   * SuperEmbed accepts either and resolves client-side, so a wrong-looking id
+   * is not detectable server-side.
+   */
+  imdbKeyed?: boolean;
 }
 
+/**
+ * Providers, in the order the chooser offers them.
+ *
+ * Every entry here was probed before being added; see the notes on the ones
+ * that behave unexpectedly. `superembed_vip` was removed after
+ * `directstream.php` answered 404 for every id.
+ */
 export const EMBED_PROVIDERS: EmbedProvider[] = [
   {
     id: 'vidsrc',
     name: 'VidSrc',
     movie: (id) => `https://vidsrc.to/embed/movie/${id}`,
     tv: (id, s, e) => `https://vidsrc.to/embed/tv/${id}/${s}/${e}`,
+    hasTracks: true,
+  },
+  {
+    id: 'vidcore',
+    name: 'VidCore',
+    movie: (id) => `https://vidcore.org/embed/movie/${id}`,
+    tv: (id, s, e) => `https://vidcore.org/embed/tv/${id}/${s}/${e}`,
     hasTracks: true,
   },
   {
@@ -45,13 +66,43 @@ export const EMBED_PROVIDERS: EmbedProvider[] = [
     tv: (id, s, e) => `https://vaplayer.ru/embed/tv/${id}/${s}/${e}`,
     hasTracks: false,
   },
+  {
+    id: 'embed2',
+    name: '2Embed',
+    // Keyed on IMDb, which it prefers, but it accepts a TMDB id too — verified
+    // against both. Note the host: 2embed.online 301s to 2embed.stream, and it
+    // is that host which then has to be allowed to navigate in-app.
+    movie: (id, imdbId) => `https://www.2embed.online/embed/movie/${imdbId ?? id}`,
+    tv: (id, s, e, imdbId) => `https://www.2embed.online/embed/tv/${imdbId ?? id}/${s}/${e}`,
+    imdbKeyed: true,
+    hasTracks: false,
+  },
+  {
+    id: 'superembed_stream',
+    name: 'SuperEmbed Stream',
+    // Returns an identical 3986-byte shell for a valid id, an invalid id and no
+    // id at all — it resolves the title client-side, so a 200 here proves only
+    // that the page exists, never that the id is good.
+    movie: (id, imdbId) => `https://www.superembed.stream/dooplay.html?imdb=${imdbId ?? id}`,
+    tv: (id, s, e, imdbId) =>
+      `https://www.superembed.stream/dooplay.html?imdb=${imdbId ?? id}&season=${s}&episode=${e}`,
+    imdbKeyed: true,
+    hasTracks: false,
+  },
 ];
 
 /** All providers, in priority order. */
-export function getEmbedSources(media: { id: number; type: 'movie' | 'tv' }, season?: number, episode?: number): { provider: EmbedProvider; url: string }[] {
+export function getEmbedSources(
+  media: { id: number; type: 'movie' | 'tv'; imdbId?: string },
+  season?: number,
+  episode?: number
+): { provider: EmbedProvider; url: string }[] {
   return EMBED_PROVIDERS.map((p) => ({
     provider: p,
-    url: media.type === 'movie' ? p.movie(media.id) : p.tv(media.id, season ?? 1, episode ?? 1),
+    url:
+      media.type === 'movie'
+        ? p.movie(media.id, media.imdbId)
+        : p.tv(media.id, season ?? 1, episode ?? 1, media.imdbId),
   }));
 }
 
