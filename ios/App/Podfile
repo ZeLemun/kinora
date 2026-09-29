@@ -1,7 +1,3 @@
-require 'json'
-
-package = JSON.parse(File.read(File.join(__dir__, 'package.json')))
-
 platform :ios, '15.0'
 use_frameworks!
 
@@ -21,8 +17,9 @@ def capacitor_pods
   pod 'Capacitor', :path => '../node_modules/@capacitor/ios'
   pod 'CapacitorCordova', :path => '../node_modules/@capacitor/ios'
 
-  # Declared from package.json rather than hard-coded, so adding a plugin does
-  # not need a second edit here.
+  # Each plugin is skipped when absent, so removing one from package.json does
+  # not need a second edit here. The Podfile must not read package.json: it
+  # lives at the repository root, not beside this file.
   %w[browser haptics preferences splash-screen status-bar screen-orientation].each do |plugin|
     plugin_path = "../node_modules/@capacitor/#{plugin}"
     next unless File.exist?(plugin_path)
