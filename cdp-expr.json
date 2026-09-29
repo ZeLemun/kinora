@@ -1,0 +1,4 @@
+[
+  "location.href",
+  "document.body.innerText.slice(0,200)"
+]

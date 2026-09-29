@@ -62,17 +62,36 @@ public class ImmersivePlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func setLandscape(_ call: CAPPluginCall) {
         let locked = call.getBool("locked") ?? false
         DispatchQueue.main.async {
-            if locked {
-                self.orientationMask = .landscape
-            } else {
-                self.orientationMask = .allButUpsideDown
-            }
-            if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-                scene.requestGeometryUpdate(
-                    .iOS(interfaceOrientations: self.orientationMask)
-                )
-            }
+            self.orientationMask = locked ? .landscape : .allButUpsideDown
+            self.applyOrientation()
             call.resolve()
+        }
+    }
+
+    /**
+     Applies the supported orientation mask to the active window scene.
+
+     Two APIs, because the deployment target is iOS 15 and
+     `requestGeometryUpdate(_:)` only exists from 16.0. The older path is the
+     long-documented way to force a rotation — set the device orientation and
+     ask the responder chain to re-evaluate — and it is what Capacitor's own
+     ScreenOrientation plugin used before 16 existed.
+
+     This compiled as an error rather than a warning, so it is not optional.
+     */
+    private func applyOrientation() {
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }) else { return }
+
+        if #available(iOS 16.0, *) {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: orientationMask))
+        } else {
+            let raw: UIInterfaceOrientation = orientationMask == .landscape
+                ? .landscapeRight
+                : .portrait
+            UIDevice.current.setValue(raw.rawValue, forKey: "orientation")
+            UIViewController.attemptRotationToDeviceOrientation()
         }
     }
 
