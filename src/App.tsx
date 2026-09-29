@@ -8,7 +8,6 @@ import { useAppStore, selectTheme } from './store/app-store';
 import { useIsLandscape, useKeyboardOpen } from './hooks/useViewport';
 import { HomePage } from './pages/HomePage';
 import { DiscoverPage } from './pages/DiscoverPage';
-import { CatalogPage } from './pages/CatalogPage';
 import { SearchPage } from './pages/SearchPage';
 import { LibraryPage } from './pages/LibraryPage';
 import { DetailPage } from './pages/DetailPage';
@@ -60,12 +59,12 @@ function Shell() {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/discover" element={<DiscoverPage />} />
-            {/* The Movies tab was removed in favour of Discover, but the URL
-                is kept alive as a redirect so old links and bookmarks land on
-                the equivalent listing instead of silently falling through to
-                the home page. */}
+            {/* The Movies and Series tabs were both removed in favour of
+                Discover, but the URLs are kept alive as redirects so old links
+                and bookmarks land on the equivalent listing instead of silently
+                falling through to the home page. */}
             <Route path="/movies" element={<Navigate to="/discover?type=movie" replace />} />
-            <Route path="/series" element={<CatalogPage type="series" />} />
+            <Route path="/series" element={<Navigate to="/discover?type=series" replace />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/watchlist" element={<LibraryPage initialTab="watchlist" />} />

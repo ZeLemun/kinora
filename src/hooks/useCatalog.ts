@@ -1,10 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import {
-  discover,
   fetchGenres,
   fetchRow,
   rememberGenres,
-  type DiscoverFilters,
   type RowKey,
 } from '../services/catalog';
 import type { Media, MediaType } from '../store/app-store';
@@ -27,17 +25,6 @@ export function useRows(keys: RowKey[]) {
     isLoading: queries.some((q) => q.isLoading),
     isError: queries.some((q) => q.isError),
   };
-}
-
-export function useDiscover(filters: DiscoverFilters) {
-  return useQuery({
-    queryKey: ['discover', filters],
-    queryFn: () => discover(filters),
-    staleTime: 5 * 60_000,
-    // Keep the previous page on screen while the next one loads, so the grid
-    // doesn't flash empty between pages.
-    placeholderData: (prev) => prev,
-  });
 }
 
 export function useGenres(type: MediaType) {

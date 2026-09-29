@@ -21,13 +21,6 @@ const CompassIcon: Icon = ({ className }) => (
   </svg>
 );
 
-const TvIcon: Icon = ({ className }) => (
-  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-    <rect x="2.5" y="7" width="19" height="12.5" rx="2" />
-    <path d="m8 3 4 4 4-4" />
-  </svg>
-);
-
 const SearchIcon: Icon = ({ className }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
     <circle cx="11" cy="11" r="7" />
@@ -74,11 +67,10 @@ interface NavItem {
 const PRIMARY: NavItem[] = [
   { to: '/', label: 'Home', icon: HomeIcon },
   { to: '/discover', label: 'Discover', icon: CompassIcon },
-  { to: '/series', label: 'Series', icon: TvIcon },
+  { to: '/search', label: 'Search', icon: SearchIcon },
 ];
 
 const SECONDARY: NavItem[] = [
-  { to: '/search', label: 'Search', icon: SearchIcon },
   { to: '/library', label: 'Library', icon: LibraryIcon },
   { to: '/favorites', label: 'Favorites', icon: HeartIcon },
   { to: '/watchlist', label: 'Watchlist', icon: BookmarkIcon },
@@ -91,13 +83,12 @@ const SECONDARY: NavItem[] = [
  * deleting that entry would have quietly turned the third tab into Movies
  * with no error anywhere.
  */
-const MOBILE_PATHS = ['/', '/discover', '/series', '/library'];
+const MOBILE_PATHS = ['/', '/discover', '/search', '/library'];
 const MOBILE_PRIMARY: NavItem[] = [...PRIMARY, ...SECONDARY].filter((i) =>
   MOBILE_PATHS.includes(i.to)
 );
 
 const MORE_ITEMS: NavItem[] = [
-  { to: '/search', label: 'Search', icon: SearchIcon },
   { to: '/watchlist', label: 'Watchlist', icon: BookmarkIcon },
   { to: '/favorites', label: 'Favorites', icon: HeartIcon },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
