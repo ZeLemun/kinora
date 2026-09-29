@@ -1,85 +1,86 @@
-name: Build iOS .ipa
+name: Build iOS (unsigned .ipa)
+
+# Produces an unsigned .ipa that can be signed on Windows with Sideloadly or
+# AltStore. There is deliberately no signing certificate in this workflow: the
+# point is that a machine without Xcode — and without a paid Apple Developer
+# account — can still get an installable artefact.
+#
+# Sideloadly and AltStore inject the certificate and profile themselves and
+# re-sign the bundle, which only works if the build is genuinely unsigned. A
+# half-signed build fails at install with a confusing profile error.
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-    tags: ['v*']
-  workflow_dispatch:
-
-permissions:
-  contents: write
+    paths:
+      - 'src/**'
+      - 'ios/**'
+      - 'package.json'
+      - 'capacitor.config.ts'
+      - '.github/workflows/ios.yml'
 
 jobs:
-  build-ios:
-    name: Build iOS .ipa
+  build:
+    # macos-14 ships Xcode 15, which is the first version with the Swift
+    # concurrency in the Capacitor 8 iOS templates. Earlier runners fail to
+    # compile the generated project.
     runs-on: macos-14
-    timeout-minutes: 30
-    
+
     steps:
-      - name: Checkout repository
+      - name: Check out
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: 22
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Build web assets
+      # The web bundle has to exist before the native sync, or the app ships
+      # whatever was last committed into ios/App/public.
+      - name: Build web bundle
         run: npm run build
-
-      - name: Install CocoaPods
-        run: |
-          sudo gem install cocoapods -v 1.15.2
-          cd ios/App
-          pod install --repo-update
-
-      - name: Install Capacitor CLI
-        run: npm install -g @capacitor/cli
 
       - name: Sync Capacitor
         run: npx cap sync ios
 
-      - name: Build .ipa (unsigned)
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: Build unsigned archive
         run: |
-          cd ios/App
-          xcodebuild -workspace App.xcworkspace \
+          xcodebuild \
+            -workspace ios/App/App.xcworkspace \
             -scheme App \
             -configuration Release \
-            -archivePath build/App.xcarchive \
+            -sdk iphoneos \
             -destination 'generic/platform=iOS' \
-            archive \
+            -archivePath "$RUNNER_TEMP/Kinora.xcarchive" \
             CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            EXPANDED_CODE_SIGN_IDENTITY="" \
-            EXPANDED_CODE_SIGN_IDENTITY_NAME="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            DEVELOPMENT_TEAM="" \
-            -quiet
-
-          xcodebuild -exportArchive \
-            -archivePath build/App.xcarchive \
-            -exportPath build \
-            -exportOptionsPlist ExportOptions.plist \
-            CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            -quiet
+            archive
 
-      - name: Upload .ipa artifact
+      - name: Package the .ipa
+        run: |
+          # The app must be named Payload.app inside the archive or iOS will
+          # refuse the install. Xcode does not always do this for an unsigned
+          # archive, so it is done explicitly rather than trusted.
+          rm -rf "$RUNNER_TEMP/Payload"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$RUNNER_TEMP/Kinora.xcarchive/Products/Applications/App.app" \
+                "$RUNNER_TEMP/Payload/Kinora.app"
+          cd "$RUNNER_TEMP"
+          zip -qry Kinora-unsigned.ipa Payload
+
+      - name: Upload the .ipa
         uses: actions/upload-artifact@v4
         with:
-          name: Kinora-ipa
-          path: ios/App/build/Kinora.ipa
+          name: Kinora-unsigned-ipa
+          path: ${{ runner.temp }}/Kinora-unsigned.ipa
           retention-days: 30
-
-      - name: Create Release (on tag)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ios/App/build/Kinora.ipa
-          generate_release_notes: true
+          if-no-files-found: error
