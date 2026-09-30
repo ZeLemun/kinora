@@ -31,6 +31,11 @@ import Capacitor
  2. `target="_blank"` / `window.open()` popups. Capacitor's default opens *every*
     one of them in the system browser, which is precisely the ad case.
 
+ What is deliberately *not* blocked is a sub-frame navigation, which is the third
+ case and the one that caused the player to sit paused. See the note in
+ `NavigationGuard.webView(_:decidePolicyFor:)` — it has its own explanation, and
+ it is the reason Android and iOS behaved differently on identical code.
+
  The plugin class exists because Capacitor needs something to register; the
  delegate is installed by `SceneDelegate` because it has to wrap the one
  Capacitor has already assigned.
@@ -90,7 +95,7 @@ final class NavigationGuard: WebViewDelegationHandler {
 
     /// True for the app's own documents and resources.
     private func isAppURL(_ url: URL) -> Bool {
-        guard let origin = appOrigin, let scheme = url.scheme else { return false }
+        guard let origin = appOrigin else { return false }
         if url.scheme != origin.scheme { return false }
         // The custom scheme always serves from localhost; the port is not part
         // of the identity, so the host is compared rather than the full origin.
@@ -102,6 +107,41 @@ final class NavigationGuard: WebViewDelegationHandler {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
+        // A nil target frame is a new window: `target="_blank"` or
+        // `window.open()`. Dropped outright — that is the advert path, and
+        // Capacitor's default for it is the system browser.
+        if navigationAction.targetFrame == nil {
+            decisionHandler(.cancel)
+            return
+        }
+
+        /*
+         Sub-frames are the provider's own business, and this is the single
+         most important line in the file.
+
+         A provider player runs its preroll advert inside a nested iframe, and
+         WKNavigationDelegate's `decidePolicyFor` is called for sub-frame
+         navigations exactly as it is for the top one. Treating them the same
+         — which the first version of this file did — cancels the advert,
+         because an ad host is never going to be on `allowNavigation`. VidCore
+         then gives up on its preroll and parks the video paused a few seconds
+         in, behind its own play button: the app looked like it could not
+         autoplay, when in fact it had killed the thing that starts playback.
+
+         Android never saw this, and the asymmetry is the tell. WebView's
+         `shouldOverrideUrlLoading` is only ever called for the main frame, so
+         the equivalent guard there was correct by default. WKWebView has no
+         such default.
+
+         Letting sub-frames through costs nothing: the two things worth blocking
+         are a top-level navigation away from the app and a popup, and both are
+         handled above and below.
+         */
+        if navigationAction.targetFrame?.isMainFrame == false {
+            super.webView(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
+            return
+        }
+
         guard let url = navigationAction.request.url else {
             super.webView(webView, decidePolicyFor: navigationAction, decisionHandler: decisionHandler)
             return

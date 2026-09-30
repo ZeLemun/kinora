@@ -28,9 +28,11 @@ const STALL_MS = 9000;
  * that actually work. Anything the host app wants to control has to be a direct
  * file source rather than an embed.
  *
- * The chrome is persistent rather than auto-hiding for the same reason: this
- * player does not own the transport, so it cannot re-show a control bar on tap
- * the way VideoPlayer does. Fading would leave the viewer with no way out.
+ * That split is also why there is exactly one bar up here. The provider's
+ * transport cannot be restyled, merged or removed from out here, so the app's
+ * own bar is drawn as a single opaque strip at the top, hiding itself after 3s
+ * and returning on a tap near the top edge. Two controls competing for the same
+ * screen was the "two layers" complaint; this leaves one of them.
  */
 export function EmbedPlayer({
   src,
@@ -127,9 +129,12 @@ export function EmbedPlayer({
   /* The bar hides while the film is being watched and comes back on a tap near
      the top edge. It is not a full-screen tap target: the provider's own
      controls live under this frame, and a screen-wide catcher would eat every
-     press meant for them. */
+     press meant for them.
+
+     3s rather than 4s. The provider draws its own title at the top of the
+     frame, so the longer this bar stays up the longer the two overlap. */
   useEffect(() => {
-    const timer = setTimeout(() => setChromeVisible(false), 4000);
+    const timer = setTimeout(() => setChromeVisible(false), 3000);
     return () => clearTimeout(timer);
   }, [chromeVisible, src, reloadKey]);
 
@@ -164,25 +169,33 @@ export function EmbedPlayer({
         </div>
       ) : null}
 
-      {/* Chrome. Kept mounted and toggled by opacity so switching sources never
-          remounts the iframe and restarts playback. */}
       {/*
-        Persistent-while-wanted chrome. It hides itself while the film is being
-        watched and returns on a tap near the top edge.
+        The app's bar, and the only chrome drawn here.
 
-        `z-30` plus the `isolate` on the container are load-bearing: the frame
-        gets its own compositing layer the moment video starts, and without
-        both it painted straight over this bar.
+        `One top bar, no collision`. It is a *solid* bar with a hairline under
+        it rather than the transparent gradient it used to be, and that change is
+        the whole fix for the "two layers" complaint. The provider draws its own
+        title at the top-left of the frame — "SPIDER-MAN: BRAND NEW DAY" over
+        "Streaming · Mercury" — which is exactly where this bar sits. As a
+        gradient the two blended into unreadable mush: the back button looked
+        like it was sitting on the word "S.". Opaque, it reads as a bar that is
+        clearly above the frame, and when it hides the provider's title is left
+        clean underneath it.
+
+        Safe-area padding keeps it clear of the notch. `z-30` plus the `isolate`
+        on the container are load-bearing: the frame gets its own compositing
+        layer the moment video starts, and without both it painted straight over
+        this bar.
       */}
       <div
-        className={`absolute inset-x-0 top-0 z-30 flex items-center gap-2 bg-gradient-to-b from-black/85 via-black/45 to-transparent p-2.5 transition-opacity duration-200 ${
+        className={`safe-top absolute inset-x-0 top-0 z-30 flex items-center gap-2 border-b border-white/10 bg-black/80 px-2.5 pb-2 pt-1.5 backdrop-blur-md transition-opacity duration-200 ${
           chromeVisible ? 'opacity-100' : 'pointer-events-none opacity-0'
         }`}
       >
         <button
           onClick={onExit}
           aria-label="Back to title"
-          className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-colors active:bg-black/85"
+          className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-white/90 transition-colors active:bg-white/10"
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
@@ -201,7 +214,7 @@ export function EmbedPlayer({
           <button
             onClick={onSwitchSource}
             aria-label="Change source"
-            className="flex flex-none gap-1.5 rounded-full bg-black/60 px-3.5 py-2.5 text-xs font-medium text-white/90 backdrop-blur-sm transition-colors active:bg-black/85"
+            className="flex flex-none gap-1.5 rounded-full px-3.5 py-2.5 text-xs font-medium text-white/90 transition-colors active:bg-white/10"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
@@ -216,7 +229,7 @@ export function EmbedPlayer({
             setReloadKey((k) => k + 1);
           }}
           aria-label="Reload player"
-          className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-colors active:bg-black/85"
+          className="flex h-11 w-11 flex-none items-center justify-center rounded-full text-white/90 transition-colors active:bg-white/10"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v6h6M20 20v-6h-6" />
@@ -237,7 +250,7 @@ export function EmbedPlayer({
         <button
           onClick={revealChrome}
           aria-label="Show player controls"
-          className="absolute inset-x-0 top-0 z-20 h-16"
+          className="safe-top absolute inset-x-0 top-0 z-20 h-12"
         />
       ) : null}
     </div>
